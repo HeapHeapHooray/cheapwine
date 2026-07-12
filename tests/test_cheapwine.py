@@ -389,6 +389,39 @@ class TestCheapwine(unittest.TestCase):
             # Cleanup
             local_path.unlink()
 
+    @patch("subprocess.run")
+    def test_runner_and_version_split(self, mock_run):
+        """Test split runner and runner_version configuration in distillery.json."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        # 1. Test init with runner and version
+        result_init = self.runner.invoke(cli, ["init", "--runner", "proton-ge", "--runner-version", "11-1"])
+        self.assertEqual(result_init.exit_code, 0)
+        
+        config_path = self.test_dir / "distillery.json"
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["runner"], "proton-ge")
+        self.assertEqual(data["runner_version"], "11-1")
+        
+        # 2. Test add app with runner and version
+        result_add = self.runner.invoke(cli, ["add", "mygame", "game.exe", "--runner", "wine-ge", "--runner-version", "8-26"])
+        self.assertEqual(result_add.exit_code, 0)
+        
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["apps"]["mygame"]["runner"], "wine-ge")
+        self.assertEqual(data["apps"]["mygame"]["runner_version"], "8-26")
+        
+        # 3. Test running combined name resolution
+        # Mock resolve_and_download_runner to see what runner path it requests
+        mocked_path = "/home/heap/.local/share/cheapwine/runners/wine-ge-8-26/files/bin/wine"
+        with patch("cheapwine.runners.resolve_and_download_runner", return_value=mocked_path) as mock_download:
+            result_run = self.runner.invoke(cli, ["run", "mygame"])
+            self.assertEqual(result_run.exit_code, 0)
+            mock_download.assert_any_call("wine-ge-8-26")
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])

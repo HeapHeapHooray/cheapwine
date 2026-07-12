@@ -40,7 +40,8 @@ def cli(ctx: click.Context, version: bool):
 @click.option("--force", is_flag=True, help="Force re-initialization of prefix if it exists.")
 @click.option("--win-version", help="Windows version to configure (e.g. win95, winxp, win10).")
 @click.option("--runner", help="Global Wine runner to use (e.g. wine, proton, or absolute path).")
-def init(arch: str, force: bool, win_version: str, runner: str):
+@click.option("--runner-version", help="Global Wine runner version to use.")
+def init(arch: str, force: bool, win_version: str, runner: str, runner_version: str):
     """Initialize a new cheapwine project in the current directory."""
     project = Project.get_or_create_project()
     
@@ -50,7 +51,7 @@ def init(arch: str, force: bool, win_version: str, runner: str):
     if not project.exists():
         target_win_ver = win_version if win_version else "win10"
         target_runner = runner if runner else "wine"
-        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner)
+        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner, runner_version=runner_version)
         print_step("Created", f"distillery.json default settings")
     else:
         config = project.load_config()
@@ -63,6 +64,9 @@ def init(arch: str, force: bool, win_version: str, runner: str):
         if runner and config.get("runner") != runner:
             config["runner"] = runner
             config_changed = True
+        if runner_version and config.get("runner_version") != runner_version:
+            config["runner_version"] = runner_version
+            config_changed = True
             
         if config_changed:
             project.save_config(config)
@@ -70,7 +74,7 @@ def init(arch: str, force: bool, win_version: str, runner: str):
         else:
             print_warning(f"distillery.json already exists at {project.config_path}")
             
-    prefix_created = init_prefix(project, force=force)
+    prefix_created = init_prefix(project, force=force, runner_version_override=runner_version)
     
     # Sync settings if prefix wasn't just created (since creation already calls sync_prefix_settings)
     if not prefix_created:
@@ -121,8 +125,9 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         app_win_ver = app_config.get("win_version")
         app_wine_arch = app_config.get("wine_arch")
         app_runner = app_config.get("runner")
+        app_runner_version = app_config.get("runner_version")
         if app_win_ver:
-            set_app_win_version(project, exe_path, app_win_ver, wine_arch_override=app_wine_arch, runner_override=app_runner)
+            set_app_win_version(project, exe_path, app_win_ver, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version)
             
         # Merge configuration args with extra args passed from CLI
         app_args = app_config.get("args", [])
@@ -133,7 +138,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         
         source_label = "Auto-detected app" if is_detected else "Registered app"
         print_info("Running", f"{source_label} [accent]{app_or_exe}[/accent] -> [bold]{exe_path}[/bold] {' '.join(combined_args[1:])}")
-        exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner)
+        exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version)
     else:
         # Check if it's a file path
         # If it doesn't exist, we still try to execute it in case it's in the Wine path (like notepad)
@@ -152,7 +157,8 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--win-version", help="App-specific Windows version (e.g. win95, winxp).")
 @click.option("--arch", type=click.Choice(["win32", "win64"]), help="App-specific Wine architecture override.")
 @click.option("--runner", help="App-specific Wine runner override.")
-def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str):
+@click.option("--runner-version", help="App-specific Wine runner version override.")
+def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str):
     """Add a new application to distillery.json."""
     project = ensure_project()
     
@@ -192,7 +198,8 @@ def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ..
         workdir=workdir,
         win_version=win_version,
         wine_arch=arch,
-        runner=runner
+        runner=runner,
+        runner_version=runner_version
     )
     print_step("Added", f"App [accent]{name}[/accent] ([bold]{target_exe}[/bold]) to distillery.json")
 

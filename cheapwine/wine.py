@@ -22,7 +22,22 @@ def resolve_runner_command(runner: str) -> str:
         return downloaded_path
     return runner
 
-def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None) -> Dict[str, str]:
+def resolve_runner_name(runner: str, version: Optional[str] = None) -> str:
+    """Combines runner type and version if version is specified."""
+    if not version:
+        return runner
+        
+    runner_lower = runner.lower().strip()
+    if version.lower() in runner_lower:
+        return runner
+        
+    # Only combine if it matches standard downloadable runner templates
+    if runner_lower in ["proton-ge", "wine-ge", "ge-proton", "ge-wine"]:
+        return f"{runner}-{version}"
+        
+    return runner
+
+def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> Dict[str, str]:
     """Generates the environment dictionary for Wine execution."""
     config = project.load_config()
     
@@ -38,7 +53,9 @@ def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, win
     
     # Set WINE runner path for helpers (like winetricks)
     raw_runner = runner_override or config.get("runner") or "wine"
-    runner = resolve_runner_command(raw_runner)
+    raw_version = runner_version_override or config.get("runner_version")
+    combined_runner = resolve_runner_name(raw_runner, raw_version)
+    runner = resolve_runner_command(combined_runner)
     runner_parts = shlex.split(runner)
     if runner_parts:
         env["WINE"] = runner_parts[0]
@@ -55,7 +72,7 @@ def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, win
             
     return env
 
-def init_prefix(project: Project, force: bool = False, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None) -> bool:
+def init_prefix(project: Project, force: bool = False, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> bool:
     """Initializes the Wine prefix if it doesn't exist or if forced."""
     prefix_path = get_wine_prefix_path(project, wine_arch_override)
     
@@ -69,9 +86,12 @@ def init_prefix(project: Project, force: bool = False, wine_arch_override: Optio
     prefix_path.parent.mkdir(parents=True, exist_ok=True)
     
     raw_runner = runner_override or config.get("runner") or "wine"
-    print_info("Prefix", f"Initializing Wine prefix at [accent]./{prefix_path.name}[/accent] ({wine_arch}) using runner [bold]{raw_runner}[/bold]...")
+    raw_version = runner_version_override or config.get("runner_version")
+    combined_runner = resolve_runner_name(raw_runner, raw_version)
     
-    runner = resolve_runner_command(raw_runner)
+    print_info("Prefix", f"Initializing Wine prefix at [accent]./{prefix_path.name}[/accent] ({wine_arch}) using runner [bold]{combined_runner}[/bold]...")
+    
+    runner = resolve_runner_command(combined_runner)
     env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner)
     env["WINEDEBUG"] = "-all"
     
@@ -101,19 +121,20 @@ def init_prefix(project: Project, force: bool = False, wine_arch_override: Optio
         print_error(f"Wine runner '{runner}' is not installed or not in your PATH.")
         return False
 
-def sync_prefix_settings(project: Project, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None) -> bool:
+def sync_prefix_settings(project: Project, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> bool:
     """Syncs settings from distillery.json (like win_version) to the Wine prefix registry."""
     config = project.load_config()
     win_version = config.get("win_version")
     if not win_version:
         return False
         
-    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     env["WINEDEBUG"] = "-all"
     
     raw_runner = runner_override or config.get("runner") or "wine"
-    runner = resolve_runner_command(raw_runner)
-    runner_parts = shlex.split(runner)
+    raw_version = runner_version_override or config.get("runner_version")
+    combined_runner = resolve_runner_name(raw_runner, raw_version)
+    runner_parts = shlex.split(resolve_runner_command(combined_runner))
     
     try:
         # Run reg add to update the Windows version in Wine registry
@@ -137,13 +158,14 @@ def execute_command(
     app_env: Optional[Dict[str, str]] = None,
     workdir: Optional[str] = None,
     wine_arch_override: Optional[str] = None,
-    runner_override: Optional[str] = None
+    runner_override: Optional[str] = None,
+    runner_version_override: Optional[str] = None
 ) -> int:
     """Executes a command inside the Wine prefix context."""
     # Ensure prefix is initialized first
-    init_prefix(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    init_prefix(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     
-    env = get_wine_env(project, app_env, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    env = get_wine_env(project, app_env, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     
     # Resolve the executable if it exists locally
     resolved_args = list(cmd_args)
@@ -180,7 +202,9 @@ def execute_command(
         else:
             config = project.load_config()
             raw_runner = runner_override or config.get("runner") or "wine"
-            runner = resolve_runner_command(raw_runner)
+            raw_version = runner_version_override or config.get("runner_version")
+            combined_runner = resolve_runner_name(raw_runner, raw_version)
+            runner = resolve_runner_command(combined_runner)
             runner_parts = shlex.split(runner)
             final_cmd = runner_parts + resolved_args
             
@@ -206,12 +230,12 @@ def execute_command(
         print_error(f"Error executing command: {e}")
         return 1
 
-def set_app_win_version(project: Project, exe_name: str, win_version: str, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None) -> bool:
+def set_app_win_version(project: Project, exe_name: str, win_version: str, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> bool:
     """Configures a specific application to run under a specific Windows version in the registry."""
     # Ensure the prefix is initialized
-    init_prefix(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    init_prefix(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     
-    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     env["WINEDEBUG"] = "-all"
     
     # We only want the filename (e.g., "game.exe") for AppDefaults registry matching
@@ -219,7 +243,9 @@ def set_app_win_version(project: Project, exe_name: str, win_version: str, wine_
     
     config = project.load_config()
     raw_runner = runner_override or config.get("runner") or "wine"
-    runner = resolve_runner_command(raw_runner)
+    raw_version = runner_version_override or config.get("runner_version")
+    combined_runner = resolve_runner_name(raw_runner, raw_version)
+    runner = resolve_runner_command(combined_runner)
     runner_parts = shlex.split(runner)
     
     try:
@@ -238,14 +264,16 @@ def set_app_win_version(project: Project, exe_name: str, win_version: str, wine_
         print_warning(f"Failed to set Windows version '{win_version}' for app '{filename}': {e}")
         return False
 
-def disable_host_integration(project: Project, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None) -> bool:
+def disable_host_integration(project: Project, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> bool:
     """Disables Wine's winemenubuilder in the registry to prevent host desktop shortcut spam."""
-    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     env["WINEDEBUG"] = "-all"
     
     config = project.load_config()
     raw_runner = runner_override or config.get("runner") or "wine"
-    runner = resolve_runner_command(raw_runner)
+    raw_version = runner_version_override or config.get("runner_version")
+    combined_runner = resolve_runner_name(raw_runner, raw_version)
+    runner = resolve_runner_command(combined_runner)
     runner_parts = shlex.split(runner)
     
     try:
