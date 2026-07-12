@@ -1,5 +1,7 @@
 # 🍷 cheapwine
 
+[![Publish to PyPI](https://github.com/HeapHeapHooray/cheapwine/actions/workflows/publish.yml/badge.svg)](https://github.com/HeapHeapHooray/cheapwine/actions/workflows/publish.yml)
+
 A project-local Wine prefix and application manager (Wine's version of `uv`). 
 
 `cheapwine` brings modern, declarative, and fast workflow management to Wine environments. Instead of managing a bloated directory of global prefixes (like Lutris or Bottles), `cheapwine` isolates prefixes directly inside your project folders and exposes a clean, git-friendly configuration file named `distillery.json`.
@@ -214,6 +216,22 @@ To run the full suite of unit and integration tests (uses `click.testing.CliRunn
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+---
+
+## Publishing to PyPI
+
+This project is configured to publish automatically to PyPI via GitHub Actions using **Trusted Publishing (OIDC)**.
+
+### How to Release a New Version
+1. Create and push a version tag matching `v*` (e.g. `v0.1.0`):
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+2. The workflow will automatically extract the version (stripping the leading `v`), write it into `pyproject.toml`, build the distribution packages, and publish to PyPI.
+
+Alternatively, you can trigger the build manually from the GitHub Actions tab, selecting a custom version override if desired.
 
 ---
 
