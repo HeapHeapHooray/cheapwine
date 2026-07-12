@@ -4,6 +4,7 @@ import json
 import urllib.request
 import tarfile
 import re
+import platform
 from pathlib import Path
 from typing import Optional, Tuple
 from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
@@ -81,6 +82,33 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
         print_error(f"Failed to find wine executable in the extracted runner archive at {runner_dir}")
         sys.exit(1)
 
+def is_matching_arch(asset_name: str) -> bool:
+    """Helper to check if the asset matches the host architecture."""
+    asset_name_lower = asset_name.lower()
+    host = platform.machine().lower()
+    
+    # Normalize host
+    if host in ["x86_64", "amd64", "x64"]:
+        host_norm = "x86_64"
+    elif host in ["aarch64", "arm64"]:
+        host_norm = "arm64"
+    else:
+        host_norm = host
+        
+    if host_norm == "x86_64":
+        # Exclude ARM, 32-bit, or other architectures
+        exclusions = ["aarch64", "arm64", "armhf", "armv", "i386", "i686", "386"]
+        for excl in exclusions:
+            if excl in asset_name_lower:
+                return False
+        return True
+    elif host_norm == "arm64":
+        # Must contain arm64 or aarch64
+        return "aarch64" in asset_name_lower or "arm64" in asset_name_lower
+    else:
+        # Fallback: if host name is in asset name, or if no other arch is in asset name
+        return host in asset_name_lower
+
 def fetch_github_release(repo: str, version_part: str = "") -> Tuple[str, str, str]:
     """Queries GitHub API to find the matching tag and download asset URL."""
     url = f"https://api.github.com/repos/{repo}/releases"
@@ -111,7 +139,8 @@ def fetch_github_release(repo: str, version_part: str = "") -> Tuple[str, str, s
             for asset in release.get("assets", []):
                 name = asset.get("name", "")
                 if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
-                    return tag, asset.get("browser_download_url"), name
+                    if is_matching_arch(name):
+                        return tag, asset.get("browser_download_url"), name
                     
     except Exception as e:
         print_error(f"Error communicating with GitHub API: {e}")

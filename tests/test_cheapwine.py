@@ -291,6 +291,23 @@ class TestCheapwine(unittest.TestCase):
             self.assertIn("Auto-detected app", result.output)
             self.assertIn("steam.exe", result.output)
 
+    def test_arch_filtering(self):
+        """Test that only matching architectures are accepted by the downloader."""
+        from cheapwine.runners import is_matching_arch
+        from unittest.mock import patch
+        
+        # Test on x86_64 machine
+        with patch("platform.machine", return_value="x86_64"):
+            self.assertTrue(is_matching_arch("GE-Proton11-1.tar.gz"))
+            self.assertFalse(is_matching_arch("GE-Proton11-1-aarch64.tar.gz"))
+            self.assertFalse(is_matching_arch("GE-Proton11-1-arm64.tar.gz"))
+            
+        # Test on aarch64 machine
+        with patch("platform.machine", return_value="aarch64"):
+            self.assertTrue(is_matching_arch("GE-Proton11-1-aarch64.tar.gz"))
+            self.assertTrue(is_matching_arch("GE-Proton11-1-arm64.tar.gz"))
+            self.assertFalse(is_matching_arch("GE-Proton11-1.tar.gz"))
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])
