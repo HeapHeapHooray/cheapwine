@@ -236,22 +236,31 @@ def add(name: Optional[str], exe: Optional[str], args: Tuple[str, ...], env: Tup
             target_exe = detected[idx]["exe"]
             print_info("Selected", f"[accent]{name}[/accent] -> [bold]{target_exe}[/bold]")
     
-    if not target_exe:
+    if not target_exe or (target_exe and '/' not in target_exe and '\\' not in target_exe and '.' not in target_exe):
         from cheapwine.tui import scan_installed_apps
         with console.status("[bold green]Scanning for installed applications..."):
             detected = scan_installed_apps(project)
         match = None
-        for app in detected:
-            if app["name"].lower() == name.lower():
-                match = app
-                break
+        if target_exe:
+            exe_stem = target_exe.lower()
+            for app in detected:
+                if app["name"].lower() == name.lower():
+                    match = app
+                    break
+                if Path(app["exe"]).stem.lower() == exe_stem:
+                    match = app
+        else:
+            for app in detected:
+                if app["name"].lower() == name.lower():
+                    match = app
+                    break
         if match:
             target_exe = match["exe"]
             print_info("Auto-detect", f"Found auto-detected application '{match['name']}' -> [bold]{target_exe}[/bold]")
+        elif target_exe:
+            target_exe = target_exe + ".exe"
         else:
-            print_error(f"Executable path is required unless registering a known auto-detected application.")
-            print_info("Hint", "Use [command]cheapwine list -d[/command] to see auto-detected applications, or specify the path: [command]cheapwine add <name> <exe_path>[/command]")
-            sys.exit(1)
+            target_exe = name + ".exe"
 
     # Parse env key-values
     env_dict = {}
@@ -672,7 +681,7 @@ def _sync_app_desktop(project: Project, app_name: str, icon_name: Optional[str] 
 
     content = f"""[Desktop Entry]
 Name={project.root_dir.name} - {app_name}
-Exec={cheapwine_path} run {app_name} %u
+Exec={cheapwine_path} run "{app_name}" %u
 Path={project.root_dir.absolute()}
 Icon={icon_name}
 Terminal=false

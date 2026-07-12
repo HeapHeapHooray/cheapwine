@@ -175,10 +175,12 @@ class TestCheapwine(unittest.TestCase):
             self.assertIsNotNone(app)
             self.assertEqual(app["exe"], "C:\\Program Files\\superapp.exe")
             
-            # Try to add something that is not auto-detected (should fail)
-            result_fail = self.runner.invoke(cli, ["add", "unknownapp"])
-            self.assertNotEqual(result_fail.exit_code, 0)
-            self.assertIn("Executable path is required", result_fail.output)
+            # Try to add something that is not auto-detected (should fall back to name.exe)
+            result_fallback = self.runner.invoke(cli, ["add", "unknownapp"])
+            self.assertEqual(result_fallback.exit_code, 0)
+            app_fallback = Project(self.test_dir).get_app("unknownapp")
+            self.assertIsNotNone(app_fallback)
+            self.assertEqual(app_fallback["exe"], "unknownapp.exe")
 
     def test_export_unexport_command(self):
         """Test exporting and unexporting desktop launchers."""
