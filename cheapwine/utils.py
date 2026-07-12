@@ -8,9 +8,12 @@ theme = Theme({
     "warning": "yellow",
     "error": "bold red",
     "success": "bold green",
-    "accent": "bold blue",
+    "accent": "bold bright_blue",
     "bold": "bold",
-    "command": "magenta",
+    "command": "bold magenta",
+    "dim": "dim",
+    "highlight": "bold bright_cyan",
+    "subtle": "bright_black",
 })
 
 console = Console(theme=theme)

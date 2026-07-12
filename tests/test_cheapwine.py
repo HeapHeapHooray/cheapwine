@@ -490,7 +490,7 @@ class TestCheapwine(unittest.TestCase):
             self.runner.invoke(cli, ["init"])
             result = self.runner.invoke(cli, ["easydistill"], input="q")
             self.assertEqual(result.exit_code, 0)
-            self.assertIn("cheapwine EasyDistill TUI", result.output)
+            self.assertIn("cheapwine EasyDistill", result.output)
             self.assertIn("Main Menu", result.output)
         finally:
             del os.environ["CHEAPWINE_TESTING"]

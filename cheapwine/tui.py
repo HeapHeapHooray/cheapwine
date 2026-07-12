@@ -161,10 +161,17 @@ def run_tui(project: Project):
     
     try:
         while True:
+            from rich import box
             from rich.panel import Panel
             from rich.table import Table
             
-            table = Table(box=None, show_header=True, header_style="bold blue")
+            table = Table(
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold bright_cyan",
+                border_style="bright_blue",
+                padding=(0, 1),
+            )
             table.add_column("", width=3)
             table.add_column("Application Name", style="bold")
             table.add_column("Type", style="dim")
@@ -172,22 +179,23 @@ def run_tui(project: Project):
             
             for idx, opt in enumerate(options):
                 is_selected = (idx == selected_index)
-                pointer = "➔" if is_selected else ""
-                style = "bold green" if is_selected else ""
+                pointer = "▸" if is_selected else " "
+                row_style = "reverse" if is_selected else ""
                 
                 table.add_row(
                     pointer,
                     opt["name"],
                     opt["type"],
                     opt["exe"],
-                    style=style
+                    style=row_style,
                 )
                 
             panel = Panel(
                 table,
-                title="[bold accent] cheapwine Distillery [/bold accent]",
-                subtitle="Use [bold]UP/DOWN[/bold] arrows, [bold]ENTER[/bold] to run, [bold]q/ESC[/bold] to quit",
-                border_style="blue"
+                title="[bold bright_cyan] cheapwine Distillery [/bold bright_cyan]",
+                subtitle=" [dim]↑↓[/dim] Navigate  [dim]↵[/dim] Launch  [dim]Q[/dim] Quit ",
+                border_style="bright_blue",
+                padding=(1, 2),
             )
             
             sys.stdout.write("\033[H\033[J") # Clear screen
@@ -296,28 +304,35 @@ def run_easydistill(project: Project):
             sel_idx = choices.index(current)
             
         while True:
+            from rich import box
             from rich.panel import Panel
             from rich.table import Table
             
-            table = Table(box=None, show_header=False)
+            table = Table(
+                box=box.ROUNDED,
+                show_header=False,
+                border_style="bright_blue",
+                padding=(0, 1),
+            )
             table.add_column("", width=3)
             table.add_column("Option")
             
             for idx, choice in enumerate(choices):
                 is_selected = (idx == sel_idx)
-                pointer = "➔" if is_selected else ""
-                style = "bold green" if is_selected else ""
+                pointer = "▸" if is_selected else " "
+                row_style = "reverse" if is_selected else ""
                 
                 label = choice
                 if choice == current:
                     label = f"{choice} [dim](current)[/dim]"
-                table.add_row(pointer, label, style=style)
+                table.add_row(pointer, label, style=row_style)
                 
             panel = Panel(
                 table,
-                title=f"[bold blue] Select {title} [/bold blue]",
-                subtitle="Use UP/DOWN arrows, ENTER to select, ESC/q to cancel",
-                border_style="blue"
+                title=f"[bold bright_cyan] Select {title} [/bold bright_cyan]",
+                subtitle=" [dim]↑↓[/dim] Navigate  [dim]↵[/dim] Confirm  [dim]ESC[/dim] Cancel ",
+                border_style="bright_blue",
+                padding=(1, 2),
             )
             
             sys.stdout.write("\033[H\033[J") # Clear screen
@@ -461,24 +476,31 @@ def run_easydistill(project: Project):
             selected_index = max(0, min(selected_index, len(options) - 1))
             
             # Draw screen
+            from rich import box
             from rich.panel import Panel
             from rich.table import Table
             
-            table = Table(box=None, show_header=False)
+            table = Table(
+                box=box.ROUNDED,
+                show_header=False,
+                border_style="bright_blue",
+                padding=(0, 1),
+            )
             table.add_column("", width=3)
             table.add_column("Option")
             
             for idx, opt in enumerate(options):
                 is_selected = (idx == selected_index)
-                pointer = "➔" if is_selected else ""
-                style = "bold green" if is_selected else ""
-                table.add_row(pointer, opt["label"], style=style)
+                pointer = "▸" if is_selected else " "
+                row_style = "reverse" if is_selected else ""
+                table.add_row(pointer, opt["label"], style=row_style)
                 
             panel = Panel(
                 table,
-                title=f"[bold blue] cheapwine EasyDistill TUI [/bold blue] > [bold accent]{menu_title}[/bold accent]",
+                title=f"[bold bright_cyan] cheapwine EasyDistill [/bold bright_cyan] > [bold]{menu_title}[/bold]",
                 subtitle=menu_subtitle,
-                border_style="blue"
+                border_style="bright_blue",
+                padding=(1, 2),
             )
             
             sys.stdout.write("\033[H\033[J") # Clear screen
@@ -751,7 +773,7 @@ def run_easydistill(project: Project):
                 elif action == "edit_app_uri_schemes":
                     app_info = config.get("apps", {}).get(selected_app_name, {})
                     current = ", ".join(app_info.get("uri_schemes", []))
-                    val = read_text_input("Enter comma-separated URI schemes (e.g. flstudio, fruityloops)", current)
+                    val = read_text_input("Enter comma-separated URI schemes (e.g. myapp, myapp2)", current)
                     schemes = [s.strip() for s in val.split(",") if s.strip()]
                     if schemes:
                         app_info["uri_schemes"] = schemes

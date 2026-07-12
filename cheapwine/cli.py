@@ -188,7 +188,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--runner-version", help="App-specific Wine runner version override.")
 @click.option("--tricks", "-t", multiple=True, help="App-specific Winetricks components (can specify multiple times).")
 @click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support for this application.")
-@click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register for this app (e.g. flstudio). Can specify multiple times.")
+@click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register for this app (e.g. myapp). Can specify multiple times.")
 def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], uri_scheme: Tuple[str, ...]):
     """Add a new application to distillery.json.
 
@@ -585,7 +585,7 @@ def _launch_app_from_uri(project, app_name, app_info, url):
 
 @cli.command()
 @click.argument("name", metavar="<NAME>")
-@click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register (e.g. flstudio). Can specify multiple times.")
+@click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register (e.g. myapp). Can specify multiple times.")
 def export(name: str, uri_scheme: Tuple[str, ...]):
     """Export an application to the host Linux desktop menu.
 
@@ -660,7 +660,7 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
     app_schemes = list(dict.fromkeys(app_schemes + explicit_schemes))  # deduplicate preserving order
     
     # Fallback: infer URI scheme from exe's parent directory name
-    # e.g. ".../FL Studio 2026/FL64.exe" -> parent dir "FL Studio 2026" -> "flstudio"
+    # e.g. ".../MyApp 2026/MyApp.exe" -> parent dir "MyApp 2026" -> "myapp"
     if not app_schemes and full_exe_path:
         import re
         parent = full_exe_path.parent.name
