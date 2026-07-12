@@ -362,13 +362,15 @@ def apply_winetricks_components(project: Project, components: List[str], wine_ar
     
     cmd = [winetricks_bin, "-q"] + missing
     
+    local_path = Path("~/.local/share/cheapwine/bin/winetricks").expanduser()
+    
     try:
         with console.status(f"[bold green]Running Winetricks to apply {', '.join(missing)}..."):
             subprocess.run(
                 cmd,
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
                 check=True
             )
         # Update applied tricks file
@@ -377,6 +379,41 @@ def apply_winetricks_components(project: Project, components: List[str], wine_ar
             json.dump(list(applied), f)
         print_step("Winetricks", f"Successfully applied winetricks components: {', '.join(missing)}")
         return True
+    except subprocess.CalledProcessError as e:
+        if winetricks_bin != str(local_path.absolute()):
+            print_warning(f"System Winetricks failed (exit code {e.returncode}).")
+            if e.stderr:
+                console.print(f"[warning]Error details:[/warning]\n{e.stderr.strip()}")
+            print_info("Winetricks", "Attempting to download and retry with the latest Winetricks from master...")
+            try:
+                winetricks_bin = ensure_winetricks(force_download=True)
+                cmd = [winetricks_bin, "-q"] + missing
+                with console.status(f"[bold green]Retrying with latest Winetricks to apply {', '.join(missing)}..."):
+                    subprocess.run(
+                        cmd,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=True
+                    )
+                applied.update(missing)
+                with open(state_file, "w") as f:
+                    json.dump(list(applied), f)
+                print_step("Winetricks", f"Successfully applied winetricks components on retry: {', '.join(missing)}")
+                return True
+            except subprocess.CalledProcessError as retry_err:
+                print_error(f"Failed to apply winetricks components {missing} on retry (exit code {retry_err.returncode}).")
+                if retry_err.stderr:
+                    console.print(f"[error]Error details:[/error]\n{retry_err.stderr.strip()}")
+                return False
+            except Exception as retry_err:
+                print_error(f"Unexpected error on winetricks retry: {retry_err}")
+                return False
+        else:
+            print_error(f"Winetricks failed to apply components {missing} (exit code {e.returncode}).")
+            if e.stderr:
+                console.print(f"[error]Error details:[/error]\n{e.stderr.strip()}")
+            return False
     except Exception as e:
-        print_warning(f"Failed to apply winetricks components {missing}: {e}")
+        print_warning(f"Unexpected error applying winetricks components {missing}: {e}")
         return False
