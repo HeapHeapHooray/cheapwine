@@ -780,6 +780,8 @@ def run_easydistill(project: Project):
                     elif "uri_schemes" in app_info:
                         del app_info["uri_schemes"]
                     project.save_config(config)
+                    from cheapwine.cli import _sync_app_desktop
+                    _sync_app_desktop(project, selected_app_name)
                     
                 # App specific env actions
                 elif action == "edit_env_key":

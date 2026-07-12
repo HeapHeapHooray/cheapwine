@@ -244,6 +244,8 @@ def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ..
         uri_schemes=list(uri_scheme) if uri_scheme else None
     )
     scheme_hint = f" --uri-scheme {' --uri-scheme '.join(uri_scheme)}" if uri_scheme else ""
+    if uri_scheme:
+        _sync_app_desktop(project, name)
     print_step("Added", f"App [accent]{name}[/accent] ([bold]{target_exe}[/bold]) to distillery.json{scheme_hint}")
 
 @cli.command(name="remove")
@@ -583,6 +585,67 @@ def _launch_app_from_uri(project, app_name, app_info, url):
     sys.exit(exit_code)
 
 
+def _sync_app_desktop(project: Project, app_name: str, icon_name: Optional[str] = None):
+    """Write or update the .desktop file for an app, syncing URI schemes with the system."""
+    config = project.load_config()
+    app_info = config.get("apps", {}).get(app_name)
+    if not app_info:
+        return
+
+    import shutil
+    cheapwine_path = shutil.which("cheapwine") or shutil.which("cw") or "cheapwine"
+
+    safe_proj_name = project.root_dir.name.replace(" ", "_").lower()
+    safe_app_name = app_name.replace(" ", "_").lower()
+
+    desktop_dir = Path("~/.local/share/applications").expanduser()
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+    desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
+
+    if icon_name is None:
+        icon_name = "wine"
+        if desktop_file_path.exists():
+            for line in desktop_file_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("Icon="):
+                    icon_name = line.split("=", 1)[1].strip()
+                    break
+
+    app_schemes = app_info.get("uri_schemes", [])
+    mime_line = "MimeType=" + "".join(f"x-scheme-handler/{s};" for s in app_schemes) if app_schemes else ""
+
+    content = f"""[Desktop Entry]
+Name={project.root_dir.name} - {app_name}
+Exec={cheapwine_path} run {app_name} %u
+Path={project.root_dir.absolute()}
+Icon={icon_name}
+Terminal=false
+Type=Application
+Categories=Wine;
+{mime_line}
+"""
+
+    try:
+        desktop_file_path.write_text(content, encoding="utf-8")
+
+        import subprocess
+        if app_schemes:
+            for scheme in app_schemes:
+                subprocess.run(
+                    ["xdg-mime", "default", f"{desktop_file_path.name}", f"x-scheme-handler/{scheme}"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+                )
+                subprocess.run(
+                    ["gio", "mime", f"x-scheme-handler/{scheme}", f"{desktop_file_path.name}"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+                )
+            subprocess.run(
+                ["update-desktop-database", str(desktop_dir)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            )
+    except Exception:
+        pass
+
+
 @cli.command()
 @click.argument("name", metavar="<NAME>")
 @click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register (e.g. myapp). Can specify multiple times.")
@@ -681,48 +744,14 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
         config["apps"][name] = app_config
         project.save_config(config)
     
-    # 5. Generate .desktop file with URI scheme support baked in
-    desktop_dir = Path("~/.local/share/applications").expanduser()
-    desktop_dir.mkdir(parents=True, exist_ok=True)
-    
-    desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
-    
-    mime_line = "MimeType=" + "".join(f"x-scheme-handler/{s};" for s in app_schemes) if app_schemes else ""
-    
-    content = f"""[Desktop Entry]
-Name={project.root_dir.name} - {name}
-Exec={cheapwine_path} run {name} %u
-Path={project.root_dir.absolute()}
-Icon={icon_name if icon_extracted else "wine"}
-Terminal=false
-Type=Application
-Categories=Wine;
-{mime_line}
-"""
-    
+    # 5. Sync the .desktop file and register URI schemes with the system
     try:
-        desktop_file_path.write_text(content, encoding="utf-8")
-        
-        # Register the main launcher as the handler for each URI scheme
+        _sync_app_desktop(project, name, icon_name=(icon_name if icon_extracted else "wine"))
         if app_schemes:
-            import subprocess
-            for scheme in app_schemes:
-                subprocess.run(
-                    ["xdg-mime", "default", f"{desktop_file_path.name}", f"x-scheme-handler/{scheme}"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
-                )
-                subprocess.run(
-                    ["gio", "mime", f"x-scheme-handler/{scheme}", f"{desktop_file_path.name}"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
-                )
-            subprocess.run(
-                ["update-desktop-database", str(desktop_dir)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
-            )
             schemes_str = ", ".join(app_schemes)
             print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher + URI schemes: {schemes_str}")
         else:
-            print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher: [bold]{desktop_file_path.name}[/bold]")
+            print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher")
     except Exception as e:
         print_error(f"Failed to export application: {e}")
         sys.exit(1)
