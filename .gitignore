@@ -1,0 +1,33 @@
+# Local Wine prefixes (massive binaries and registries)
+.cheapwine
+.cheapwine_*
+
+# Test artifact directory
+tmp_test_cheapwine/
+
+# Python caches and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python distribution and packaging files
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDEs, editors, and OS metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
