@@ -341,21 +341,15 @@ def is_binary_compatible(path: Path) -> bool:
     return True
 
 def ensure_winetricks(force_download: bool = False) -> str:
-    """Ensures winetricks is available. Returns the path to the executable (either system or downloaded)."""
-    import shutil
+    """Ensures winetricks is available. Returns the path to the downloaded executable."""
     local_path = Path("~/.local/share/cheapwine/bin/winetricks").expanduser()
     
     if not force_download:
-        # 1. Check system path
-        system_path = shutil.which("winetricks")
-        if system_path:
-            return system_path
-            
-        # 2. Check local path
+        # Check local path
         if local_path.exists() and os.access(local_path, os.X_OK):
             return str(local_path.absolute())
         
-    # 3. Download winetricks
+    # Download winetricks
     local_path.parent.mkdir(parents=True, exist_ok=True)
     url = "https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks"
     
