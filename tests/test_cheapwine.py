@@ -274,6 +274,23 @@ class TestCheapwine(unittest.TestCase):
         self.assertIn("Running", result.output)
         self.assertIn("Executable/Command", result.output)
 
+    @patch("subprocess.run")
+    def test_run_detected_app(self, mock_run):
+        """Test that cheapwine run can execute an unregistered auto-detected app."""
+        from unittest.mock import MagicMock, patch
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        self.runner.invoke(cli, ["init"])
+        
+        mock_detected = [{"name": "Steam", "exe": "C:\\Program Files\\Steam\\steam.exe", "source": "C:\\Program Files"}]
+        with patch("cheapwine.tui.scan_installed_apps", return_value=mock_detected):
+            # Run using the detected name "Steam" without adding it first
+            result = self.runner.invoke(cli, ["run", "Steam"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("Running", result.output)
+            self.assertIn("Auto-detected app", result.output)
+            self.assertIn("steam.exe", result.output)
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])

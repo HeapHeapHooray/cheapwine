@@ -99,6 +99,22 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         return
         
     app_config = project.get_app(app_or_exe)
+    is_detected = False
+    
+    if not app_config:
+        from cheapwine.tui import scan_installed_apps
+        with console.status("[bold green]Scanning for installed applications..."):
+            detected = scan_installed_apps(project)
+        for app in detected:
+            if app["name"].lower() == app_or_exe.lower():
+                app_config = {
+                    "exe": app["exe"],
+                    "args": [],
+                    "env": {},
+                }
+                app_or_exe = app["name"]
+                is_detected = True
+                break
     
     if app_config:
         exe_path = app_config.get("exe", "")
@@ -115,7 +131,8 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         env = app_config.get("env", {})
         workdir = app_config.get("workdir")
         
-        print_info("Running", f"Registered app [accent]{app_or_exe}[/accent] -> [bold]{exe_path}[/bold] {' '.join(combined_args[1:])}")
+        source_label = "Auto-detected app" if is_detected else "Registered app"
+        print_info("Running", f"{source_label} [accent]{app_or_exe}[/accent] -> [bold]{exe_path}[/bold] {' '.join(combined_args[1:])}")
         exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner)
     else:
         # Check if it's a file path
