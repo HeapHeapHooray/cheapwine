@@ -174,7 +174,9 @@ def execute_command(
         # Winetricks is a host script, run it directly without prepending the wine runner
         # (It will automatically use env["WINE"] which we set in get_wine_env)
         if first_arg == "winetricks":
-            final_cmd = resolved_args
+            from cheapwine.runners import ensure_winetricks
+            winetricks_bin = ensure_winetricks()
+            final_cmd = [winetricks_bin] + resolved_args[1:]
         else:
             config = project.load_config()
             raw_runner = runner_override or config.get("runner") or "wine"

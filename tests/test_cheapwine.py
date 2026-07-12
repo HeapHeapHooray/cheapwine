@@ -350,6 +350,45 @@ class TestCheapwine(unittest.TestCase):
             # Verify mock_extract was called to extract the new download
             mock_extract.assert_called()
 
+    @patch("subprocess.run")
+    def test_winetricks_auto_download(self, mock_run):
+        """Test that winetricks command resolves system winetricks or downloads a local copy."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        self.runner.invoke(cli, ["init"])
+        
+        # 1. Test when winetricks is installed in system PATH
+        with patch("shutil.which", return_value="/usr/bin/winetricks") as mock_which:
+            result = self.runner.invoke(cli, ["winetricks", "corefonts"])
+            self.assertEqual(result.exit_code, 0)
+            mock_which.assert_called_with("winetricks")
+            
+        # 2. Test when winetricks is NOT in PATH (simulates downloading local winetricks)
+        local_path = Path("~/.local/share/cheapwine/bin/winetricks").expanduser()
+        if local_path.exists():
+            local_path.unlink()
+            
+        with patch("shutil.which", return_value=None), \
+             patch("urllib.request.urlopen") as mock_urlopen, \
+             patch("os.chmod") as mock_chmod:
+                 
+            # Configure mock urlopen read to return binary script content
+            mock_response = MagicMock()
+            mock_response.read.return_value = b"#!/bin/bash\necho winetricks"
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+            
+            result = self.runner.invoke(cli, ["winetricks", "corefonts"])
+            self.assertEqual(result.exit_code, 0)
+            
+            # Verify the file was written to ~/.local/share/cheapwine/bin/winetricks
+            self.assertTrue(local_path.exists())
+            self.assertEqual(local_path.read_text(), "#!/bin/bash\necho winetricks")
+            mock_chmod.assert_called_with(local_path, 0o755)
+            
+            # Cleanup
+            local_path.unlink()
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])

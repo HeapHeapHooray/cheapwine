@@ -269,3 +269,35 @@ def is_binary_compatible(path: Path) -> bool:
         return binary_arch in ["arm64", "32bit"] # ARM 32-bit/64-bit
         
     return True
+
+def ensure_winetricks() -> str:
+    """Ensures winetricks is available. Returns the path to the executable (either system or downloaded)."""
+    import shutil
+    # 1. Check system path
+    system_path = shutil.which("winetricks")
+    if system_path:
+        return system_path
+        
+    # 2. Check local path
+    local_path = Path("~/.local/share/cheapwine/bin/winetricks").expanduser()
+    if local_path.exists() and os.access(local_path, os.X_OK):
+        return str(local_path.absolute())
+        
+    # 3. Download winetricks
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    url = "https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks"
+    
+    print_info("Download", "Downloading winetricks script...")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "cheapwine-winetricks-downloader"})
+        with urllib.request.urlopen(req) as response:
+            content = response.read()
+            
+        local_path.write_bytes(content)
+        # Make it executable (chmod +x)
+        os.chmod(local_path, 0o755)
+        print_step("Downloaded", f"Winetricks successfully installed at {local_path.name}")
+        return str(local_path.absolute())
+    except Exception as e:
+        print_error(f"Failed to download winetricks: {e}")
+        sys.exit(1)
