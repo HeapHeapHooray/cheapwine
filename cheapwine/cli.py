@@ -181,7 +181,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
     sys.exit(exit_code)
 
 @cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("name", metavar="<NAME>")
+@click.argument("name", required=False, metavar="[NAME]")
 @click.argument("exe", required=False, metavar="[EXE_PATH]")
 @click.argument("args", nargs=-1, metavar="[ARGS...]")
 @click.option("--env", "-e", multiple=True, help="Environment variables in KEY=VALUE format.")
@@ -193,10 +193,11 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--tricks", "-t", multiple=True, help="App-specific Winetricks components (can specify multiple times).")
 @click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support for this application.")
 @click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register for this app (e.g. myapp). Can specify multiple times.")
-def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], uri_scheme: Tuple[str, ...]):
+def add(name: Optional[str], exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], uri_scheme: Tuple[str, ...]):
     """Add a new application to distillery.json.
 
-    <NAME> is the unique registry name for the application.
+    [NAME] is the unique registry name for the application. If omitted,
+    you will be prompted to select from auto-detected applications.
 
     [EXE_PATH] is the Windows executable (.exe) path. This is required unless
     registering a known auto-detected application by name.
@@ -206,11 +207,39 @@ def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ..
     project = ensure_project()
     
     target_exe = exe
+    if not name and not target_exe:
+        from cheapwine.tui import scan_installed_apps
+        with console.status("[bold green]Scanning for installed applications..."):
+            detected = scan_installed_apps(project)
+        if not detected:
+            print_error("No auto-detected applications found in the Wine prefix.")
+            print_info("Hint", "Specify a name and path: [command]cheapwine add <name> <exe_path>[/command]")
+            sys.exit(1)
+        if len(detected) == 1:
+            name = detected[0]["name"]
+            target_exe = detected[0]["exe"]
+            print_info("Auto-detect", f"Found application '[accent]{name}[/accent]' -> [bold]{target_exe}[/bold]")
+        else:
+            console.print("\n[bold]Auto-detected applications:[/bold]\n")
+            for i, app in enumerate(detected, 1):
+                console.print(f"  [accent]{i}.[/accent] {app['name']}  [subtle]({app['exe']})[/subtle]")
+            from rich.prompt import Prompt
+            choice = Prompt.ask("\nSelect an application to add", default="1")
+            try:
+                idx = int(choice) - 1
+                if idx < 0 or idx >= len(detected):
+                    raise ValueError
+            except (ValueError, IndexError):
+                print_error(f"Invalid selection. Please enter a number between 1 and {len(detected)}.")
+                sys.exit(1)
+            name = detected[idx]["name"]
+            target_exe = detected[idx]["exe"]
+            print_info("Selected", f"[accent]{name}[/accent] -> [bold]{target_exe}[/bold]")
+    
     if not target_exe:
         from cheapwine.tui import scan_installed_apps
         with console.status("[bold green]Scanning for installed applications..."):
             detected = scan_installed_apps(project)
-        # Try to find a match (case-insensitive)
         match = None
         for app in detected:
             if app["name"].lower() == name.lower():
