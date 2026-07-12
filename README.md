@@ -161,14 +161,20 @@ cheapwine init --runner "soda" --runner-version "9.0-1"
 ```
 
 ### Declarative Winetricks
-Define winetricks components in `distillery.json` and they are applied automatically on prefix init:
+Define winetricks components directly when initializing the project:
 
 ```bash
-cheapwine init --runner "wine-ge-8-26"
-# Then edit distillery.json to add:
-# "winetricks": ["corefonts", "vcrun2022", "dxvk"]
+cheapwine init --runner "wine-ge-8-26" --tricks corefonts --tricks vcrun2022 --tricks dxvk
+# or using the short option:
+# cheapwine init -t corefonts -t vcrun2022
 ```
-Components are applied on `cheapwine init` and when running an app that has them configured. Applied components are cached per prefix in `cheapwine_tricks.json` so they are only applied once.
+
+You can also declare or modify them by editing the `"winetricks"` array in `distillery.json`:
+```json
+"winetricks": ["corefonts", "vcrun2022", "dxvk"]
+```
+
+Components are applied automatically during `cheapwine init` and when running an app that has them configured. Applied components are cached per prefix in `cheapwine_tricks.json` so they are only downloaded and applied once.
 
 Per-application winetricks:
 ```bash
