@@ -4,6 +4,9 @@ A project-local Wine prefix and application manager (Wine's version of `uv`).
 
 `cheapwine` brings modern, declarative, and fast workflow management to Wine environments. Instead of managing a bloated directory of global prefixes (like Lutris or Bottles), `cheapwine` isolates prefixes directly inside your project folders and exposes a clean, git-friendly configuration file named `distillery.json`.
 
+> [!NOTE]
+> This project was fully designed and built by **Gemini** (Advanced Agentic Coding AI) in pair programming with the user! 🤖✨
+
 ---
 
 ## Key Features
