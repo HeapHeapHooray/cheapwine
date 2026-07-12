@@ -265,7 +265,11 @@ def winetricks(tricks_args: Tuple[str, ...]):
     """Run winetricks in the context of the local prefix."""
     project = ensure_project()
     args_list = ["winetricks"] + list(tricks_args)
-    print_info("Winetricks", f"Executing -> [bold]{' '.join(args_list)}[/bold]")
+    if not tricks_args:
+        print_info("Winetricks", "Launching Winetricks GUI...")
+        print_info("Hint", "In the welcome dialog, choose [accent]'Select the default wineprefix'[/accent] to configure your project's local prefix (./.cheapwine).")
+    else:
+        print_info("Winetricks", f"Executing -> [bold]{' '.join(args_list)}[/bold]")
     exit_code = execute_command(project, args_list)
     sys.exit(exit_code)
 
