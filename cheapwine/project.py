@@ -56,6 +56,7 @@ class Project:
             "wine_version": "system",
             "win_version": "win10",
             "runner": "wine",
+            "latencyflex": False,
             "winetricks": [],
             "env": {
                 "WINEDEBUG": "-all"
@@ -63,7 +64,7 @@ class Project:
             "apps": {}
         }
 
-    def init_project_files(self, wine_arch: str = "win64", win_version: str = "win10", runner: str = "wine", runner_version: str = None) -> bool:
+    def init_project_files(self, wine_arch: str = "win64", win_version: str = "win10", runner: str = "wine", runner_version: str = None, latencyflex: bool = False) -> bool:
         """Initializes distillery.json if not present."""
         if self.exists():
             return False
@@ -72,6 +73,7 @@ class Project:
         config["wine_arch"] = wine_arch
         config["win_version"] = win_version
         config["runner"] = runner
+        config["latencyflex"] = latencyflex
         if runner_version:
             config["runner_version"] = runner_version
         self.save_config(config)
@@ -82,7 +84,7 @@ class Project:
         config = self.load_config()
         return config.get("apps", {}).get(app_name)
 
-    def add_app(self, app_name: str, exe_path: str, args: list = None, env: dict = None, workdir: str = None, win_version: str = None, wine_arch: str = None, runner: str = None, runner_version: str = None, winetricks: list = None) -> Dict[str, Any]:
+    def add_app(self, app_name: str, exe_path: str, args: list = None, env: dict = None, workdir: str = None, win_version: str = None, wine_arch: str = None, runner: str = None, runner_version: str = None, winetricks: list = None, latencyflex: bool = None) -> Dict[str, Any]:
         """Adds or updates an app in distillery.json."""
         config = self.load_config()
         if "apps" not in config:
@@ -105,6 +107,8 @@ class Project:
             app_config["runner_version"] = runner_version
         if winetricks:
             app_config["winetricks"] = winetricks
+        if latencyflex is not None:
+            app_config["latencyflex"] = latencyflex
             
         config["apps"][app_name] = app_config
         self.save_config(config)

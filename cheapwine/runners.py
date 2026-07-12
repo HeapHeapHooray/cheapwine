@@ -14,7 +14,7 @@ RUNNERS_DIR = Path("~/.local/share/cheapwine/runners").expanduser()
 
 def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     """
-    Checks if runner_name refers to a downloadable runner (Proton-GE or Wine-GE).
+    Checks if runner_name refers to a downloadable runner (Proton-GE, Wine-GE, Kron4ek, or Soda).
     If it does, ensures it is downloaded and returns the absolute path to the wine binary.
     If not, returns None.
     """
@@ -27,23 +27,32 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     # Check if it matches our downloadable patterns
     is_wine_ge = "wine-ge" in runner_lower or runner_lower.startswith("ge-wine")
     is_proton_ge = "proton-ge" in runner_lower or runner_lower.startswith("ge-proton")
+    is_kron4ek = "kron4ek" in runner_lower
+    is_soda = "soda" in runner_lower
     
-    if not (is_wine_ge or is_proton_ge):
+    if not (is_wine_ge or is_proton_ge or is_kron4ek or is_soda):
         return None
         
     # Determine the repo and release tag/prefix
     if is_wine_ge:
         repo = "GloriousEggroll/wine-ge-custom"
         type_prefix = "wine-ge"
-    else:
+    elif is_proton_ge:
         repo = "GloriousEggroll/proton-ge-custom"
         type_prefix = "proton-ge"
+    elif is_kron4ek:
+        repo = "Kron4ek/Wine-Builds"
+        type_prefix = "kron4ek"
+    elif is_soda:
+        repo = "bottlesdevs/wine"
+        type_prefix = "soda"
         
     # Parse version. e.g. "wine-ge-8-26" -> tag "GE-Proton8-26"
     version_part = ""
-    versions = re.findall(r"\d+[-.]\d+", runner_lower)
+    # Look for digits separated by dot or dash, e.g. "8-25" or "9.0" or "9.0-1"
+    versions = re.findall(r"\d+(?:[-.]\d+)+", runner_lower)
     if versions:
-        version_part = versions[0].replace(".", "-") # Normalize to 8-26
+        version_part = versions[0].replace(".", "-") # Normalize to dash-separated, e.g. 8-26
         
     # Fetch release from GitHub API
     tag_name, download_url, browser_download_name = fetch_github_release(repo, version_part)
@@ -53,6 +62,10 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
         
     # Target directory name (e.g. ~/.local/share/cheapwine/runners/wine-ge-8-26)
     clean_tag = tag_name.replace("GE-Proton", "").lower()
+    if clean_tag.startswith(f"{type_prefix}-"):
+        clean_tag = clean_tag[len(type_prefix)+1:]
+    elif clean_tag.startswith(type_prefix):
+        clean_tag = clean_tag[len(type_prefix):]
     target_name = f"{type_prefix}-{clean_tag}"
     runner_dir = RUNNERS_DIR / target_name
     
@@ -120,40 +133,97 @@ def is_matching_arch(asset_name: str) -> bool:
 
 def fetch_github_release(repo: str, version_part: str = "") -> Tuple[str, str, str]:
     """Queries GitHub API to find the matching tag and download asset URL."""
-    url = f"https://api.github.com/repos/{repo}/releases"
-    if not version_part:
-        url = f"https://api.github.com/repos/{repo}/releases/latest"
-        
-    try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "cheapwine-runner-downloader"}
-        )
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
+    if version_part:
+        # Build candidate tags based on common conventions
+        tags_to_try = []
+        version_dot = version_part.replace("-", ".")
+        if "proton-ge-custom" in repo:
+            tags_to_try.append(f"GE-Proton{version_part}")
+            tags_to_try.append(f"GE-Proton{version_dot}")
+        elif "wine-ge-custom" in repo:
+            tags_to_try.append(f"GE-Proton{version_part}")
+            tags_to_try.append(f"GE-Proton{version_dot}")
+            tags_to_try.append(f"wine-ge-{version_part}")
+            tags_to_try.append(f"wine-ge-{version_dot}")
+            tags_to_try.append(f"GE-wine{version_part}")
+            tags_to_try.append(f"GE-wine{version_dot}")
+        elif "wine-builds" in repo.lower(): # Kron4ek
+            tags_to_try.append(version_dot)
+            tags_to_try.append(version_part)
+            tags_to_try.append(f"wine-{version_dot}")
+            tags_to_try.append(f"wine-{version_part}")
+        elif "bottlesdevs/wine" in repo.lower() or "soda" in repo.lower(): # Soda
+            tags_to_try.append(f"soda-{version_dot}")
+            tags_to_try.append(f"soda-{version_part}")
+            for iter_val in ["1", "2", "3", "0", "4", "5", "6", "7", "8", "9"]:
+                tags_to_try.append(f"soda-{version_dot}-{iter_val}")
+                tags_to_try.append(f"soda-{version_part}-{iter_val}")
             
+        for tag in tags_to_try:
+            tag_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+            try:
+                req = urllib.request.Request(
+                    tag_url,
+                    headers={"User-Agent": "cheapwine-runner-downloader"}
+                )
+                with urllib.request.urlopen(req) as response:
+                    release = json.loads(response.read().decode())
+                for asset in release.get("assets", []):
+                    name = asset.get("name", "")
+                    if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
+                        if is_matching_arch(name):
+                            return release.get("tag_name", tag), asset.get("browser_download_url"), name
+            except Exception:
+                continue
+
+    # Fallback to paginated search (up to 5 pages)
+    page = 1
+    max_pages = 5
+    while page <= max_pages:
+        url = f"https://api.github.com/repos/{repo}/releases?page={page}&per_page=30"
         if not version_part:
-            releases = [data]
-        else:
-            releases = data
+            url = f"https://api.github.com/repos/{repo}/releases/latest"
             
-        for release in releases:
-            tag = release.get("tag_name", "")
-            if version_part:
-                normalized_tag = tag.lower().replace("-", "").replace(".", "")
-                normalized_ver = version_part.lower().replace("-", "").replace(".", "")
-                if normalized_ver not in normalized_tag:
-                    continue
-                    
-            for asset in release.get("assets", []):
-                name = asset.get("name", "")
-                if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
-                    if is_matching_arch(name):
-                        return tag, asset.get("browser_download_url"), name
-                    
-    except Exception as e:
-        print_error(f"Error communicating with GitHub API: {e}")
-        
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "cheapwine-runner-downloader"}
+            )
+            with urllib.request.urlopen(req) as response:
+                data = json.loads(response.read().decode())
+                
+            if not version_part:
+                releases = [data]
+            else:
+                releases = data
+                
+            if not releases:
+                break
+                
+            for release in releases:
+                tag = release.get("tag_name", "")
+                if version_part:
+                    normalized_tag = tag.lower().replace("-", "").replace(".", "")
+                    normalized_ver = version_part.lower().replace("-", "").replace(".", "")
+                    if normalized_ver not in normalized_tag:
+                        continue
+                        
+                for asset in release.get("assets", []):
+                    name = asset.get("name", "")
+                    if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
+                        if is_matching_arch(name):
+                            return tag, asset.get("browser_download_url"), name
+                            
+            if not version_part:
+                break
+                
+            page += 1
+        except Exception as e:
+            # Only print error if it's the first page or we are querying the latest release
+            if page == 1 or not version_part:
+                print_error(f"Error communicating with GitHub API: {e}")
+            break
+            
     return "", "", ""
 
 def download_file_with_progress(url: str, filename: str) -> Path:

@@ -474,6 +474,27 @@ class TestCheapwine(unittest.TestCase):
                 args = call[0][0]
                 self.assertNotIn("/usr/bin/winetricks", args)
 
+    @patch("os.isatty", return_value=True)
+    @patch("sys.stdin.fileno", return_value=0)
+    @patch("termios.tcgetattr")
+    @patch("termios.tcsetattr")
+    @patch("tty.setraw")
+    @patch("sys.stdin.read")
+    def test_easydistill_tui_main(self, mock_read, mock_setraw, mock_tcsetattr, mock_tcgetattr, mock_fileno, mock_isatty):
+        """Test easydistill command starts and responds to TUI inputs."""
+        # Configure mock_read to return 'q' immediately to exit the main loop
+        mock_read.return_value = "q"
+        
+        os.environ["CHEAPWINE_TESTING"] = "1"
+        try:
+            self.runner.invoke(cli, ["init"])
+            result = self.runner.invoke(cli, ["easydistill"], input="q")
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("cheapwine EasyDistill TUI", result.output)
+            self.assertIn("Main Menu", result.output)
+        finally:
+            del os.environ["CHEAPWINE_TESTING"]
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])
@@ -481,6 +502,103 @@ class TestCheapwine(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("export WINEPREFIX=", result.output)
         self.assertIn("export WINEARCH=win64", result.output)
+
+    @patch("subprocess.run")
+    def test_latencyflex_support(self, mock_run):
+        """Test global and application-specific LatencyFleX support."""
+        from unittest.mock import MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        # 1. Test init with --latencyflex
+        self.runner.invoke(cli, ["init", "--latencyflex"])
+        config_path = self.test_dir / "distillery.json"
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertTrue(data["latencyflex"])
+        
+        # 2. Test running app with global latencyflex
+        result = self.runner.invoke(cli, ["run", "notepad.exe"])
+        self.assertEqual(result.exit_code, 0)
+        
+        # Check that environment variables for LatencyFleX were set in mock_run call for notepad.exe
+        lfx_in_env = False
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            if cmd and cmd[-1] == "notepad.exe":
+                env = call[1].get("env", {})
+                if env.get("LFX") == "1" and env.get("PROTON_ENABLE_NVAPI") == "1":
+                    lfx_in_env = True
+        self.assertTrue(lfx_in_env)
+        
+        # 3. Disable global latencyflex
+        self.runner.invoke(cli, ["init", "--no-latencyflex"])
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertFalse(data["latencyflex"])
+        
+        # 4. Add application with application-specific override --latencyflex
+        self.runner.invoke(cli, ["add", "mygame", "game.exe", "--latencyflex"])
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertTrue(data["apps"]["mygame"]["latencyflex"])
+        
+        # 5. Run mygame, verify it has LatencyFleX enabled
+        mock_run.reset_mock()
+        self.runner.invoke(cli, ["run", "mygame"])
+        lfx_in_env = False
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            if cmd and cmd[-1] == "game.exe":
+                env = call[1].get("env", {})
+                if env.get("LFX") == "1" and env.get("PROTON_ENABLE_NVAPI") == "1":
+                    lfx_in_env = True
+        self.assertTrue(lfx_in_env)
+        
+        # 6. Add application with override --no-latencyflex when global is true
+        self.runner.invoke(cli, ["init", "--latencyflex"])
+        self.runner.invoke(cli, ["add", "mygame2", "game.exe", "--no-latencyflex"])
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertFalse(data["apps"]["mygame2"]["latencyflex"])
+        
+        # Run mygame2, verify it does NOT have LatencyFleX enabled
+        mock_run.reset_mock()
+        self.runner.invoke(cli, ["run", "mygame2"])
+        lfx_in_env = False
+        for call in mock_run.call_args_list:
+            cmd = call[0][0]
+            if cmd and cmd[-1] == "game.exe":
+                env = call[1].get("env", {})
+                if env.get("LFX") == "1":
+                    lfx_in_env = True
+        self.assertFalse(lfx_in_env)
+
+    @patch("subprocess.run")
+    def test_kron4ek_soda_runners(self, mock_run):
+        """Test resolving and downloading Kron4ek and Soda runners."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        mocked_kron4ek_path = "/home/heap/.local/share/cheapwine/runners/kron4ek-9.0/bin/wine"
+        mocked_soda_path = "/home/heap/.local/share/cheapwine/runners/soda-9.0-1/files/bin/wine"
+        
+        with patch("cheapwine.runners.resolve_and_download_runner") as mock_resolve:
+            mock_resolve.side_effect = lambda r: mocked_kron4ek_path if "kron4ek" in r else mocked_soda_path if "soda" in r else None
+            
+            # 1. Test init with Kron4ek runner
+            result = self.runner.invoke(cli, ["init", "--runner", "kron4ek-9.0"])
+            self.assertEqual(result.exit_code, 0)
+            mock_resolve.assert_any_call("kron4ek-9.0")
+            
+            # 2. Test init with Soda runner
+            result = self.runner.invoke(cli, ["init", "--runner", "soda-9.0-1"])
+            self.assertEqual(result.exit_code, 0)
+            mock_resolve.assert_any_call("soda-9.0-1")
+            
+            # 3. Test resolve_runner_name merges kron4ek and soda versions
+            from cheapwine.wine import resolve_runner_name
+            self.assertEqual(resolve_runner_name("kron4ek", "9.0"), "kron4ek-9.0")
+            self.assertEqual(resolve_runner_name("soda", "9.0-1"), "soda-9.0-1")
 
 if __name__ == "__main__":
     unittest.main()

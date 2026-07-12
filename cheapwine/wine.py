@@ -33,12 +33,12 @@ def resolve_runner_name(runner: str, version: Optional[str] = None) -> str:
         return runner
         
     # Only combine if it matches standard downloadable runner templates
-    if runner_lower in ["proton-ge", "wine-ge", "ge-proton", "ge-wine"]:
+    if runner_lower in ["proton-ge", "wine-ge", "ge-proton", "ge-wine", "kron4ek", "soda"]:
         return f"{runner}-{version}"
         
     return runner
 
-def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> Dict[str, str]:
+def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None, latencyflex_override: Optional[bool] = None) -> Dict[str, str]:
     """Generates the environment dictionary for Wine execution."""
     config = project.load_config()
     
@@ -70,6 +70,21 @@ def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, win
     if app_env:
         for k, v in app_env.items():
             env[k] = str(v)
+            
+    # Apply LatencyFleX settings if enabled
+    is_lfx = False
+    if latencyflex_override is True:
+        is_lfx = True
+    elif latencyflex_override is False:
+        is_lfx = False
+    else:
+        is_lfx = config.get("latencyflex", False)
+        
+    if is_lfx:
+        env["LFX"] = "1"
+        env["PROTON_ENABLE_NVAPI"] = "1"
+        env["DXVK_NVAPI_DRIVER_VERSION"] = "49729"
+        env["DXVK_NVAPI_ALLOW_OTHER_DRIVERS"] = "1"
             
     return env
 
@@ -167,7 +182,8 @@ def execute_command(
     wine_arch_override: Optional[str] = None,
     runner_override: Optional[str] = None,
     runner_version_override: Optional[str] = None,
-    app_winetricks: Optional[List[str]] = None
+    app_winetricks: Optional[List[str]] = None,
+    latencyflex_override: Optional[bool] = None
 ) -> int:
     """Executes a command inside the Wine prefix context."""
     # Ensure prefix is initialized first
@@ -189,7 +205,7 @@ def execute_command(
     if app_winetricks:
         apply_winetricks_components(project, app_winetricks, wine_arch_override=wine_arch_override, runner_override=combined_runner, runner_version_override=runner_version_override)
         
-    env = get_wine_env(project, app_env, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
+    env = get_wine_env(project, app_env, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override, latencyflex_override=latencyflex_override)
     
     # Resolve the executable if it exists locally
     resolved_args = list(cmd_args)

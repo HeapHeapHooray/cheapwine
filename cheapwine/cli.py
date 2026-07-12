@@ -41,7 +41,8 @@ def cli(ctx: click.Context, version: bool):
 @click.option("--win-version", help="Windows version to configure (e.g. win95, winxp, win10).")
 @click.option("--runner", help="Global Wine runner to use (e.g. wine, proton, or absolute path).")
 @click.option("--runner-version", help="Global Wine runner version to use.")
-def init(arch: str, force: bool, win_version: str, runner: str, runner_version: str):
+@click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support.")
+def init(arch: str, force: bool, win_version: str, runner: str, runner_version: str, latencyflex: Optional[bool]):
     """Initialize a new cheapwine project in the current directory."""
     project = Project.get_or_create_project()
     
@@ -51,7 +52,8 @@ def init(arch: str, force: bool, win_version: str, runner: str, runner_version: 
     if not project.exists():
         target_win_ver = win_version if win_version else "win10"
         target_runner = runner if runner else "wine"
-        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner, runner_version=runner_version)
+        target_lfx = latencyflex if latencyflex is not None else False
+        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner, runner_version=runner_version, latencyflex=target_lfx)
         print_step("Created", f"distillery.json default settings")
     else:
         config = project.load_config()
@@ -66,6 +68,9 @@ def init(arch: str, force: bool, win_version: str, runner: str, runner_version: 
             config_changed = True
         if runner_version and config.get("runner_version") != runner_version:
             config["runner_version"] = runner_version
+            config_changed = True
+        if latencyflex is not None and config.get("latencyflex") != latencyflex:
+            config["latencyflex"] = latencyflex
             config_changed = True
             
         if config_changed:
@@ -91,10 +96,31 @@ def tui():
     run_tui(project)
 
 @cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("app_or_exe", required=False)
-@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+@click.argument("app_or_exe", required=False, metavar="[APP_OR_EXE]")
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED, metavar="[EXTRA_ARGS...]")
 def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
-    """Run a registered application or an arbitrary executable."""
+    """Run a registered application or an arbitrary executable.
+
+    [APP_OR_EXE] is the name of a registered application in distillery.json,
+    an auto-detected application, or a path to an arbitrary executable. If
+    not specified, launches the interactive selection TUI.
+
+    [EXTRA_ARGS...] are optional additional command line arguments passed
+    directly to the running application.
+
+    Examples:
+      # Run notepad with no extra arguments:
+      cheapwine run notepad.exe
+
+      # Run notepad, passing arguments directly to it:
+      cheapwine run notepad.exe /p test.txt
+
+      # Run a registered game in windowed mode:
+      cheapwine run mygame -windowed -width 1920
+
+      # Run a game forcing DirectX 11 mode:
+      cheapwine run mygame -dx11
+    """
     project = ensure_project()
     
     if not app_or_exe:
@@ -127,6 +153,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         app_runner = app_config.get("runner")
         app_runner_version = app_config.get("runner_version")
         app_winetricks = app_config.get("winetricks")
+        app_latencyflex = app_config.get("latencyflex")
         if app_win_ver:
             set_app_win_version(project, exe_path, app_win_ver, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version)
             
@@ -139,7 +166,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         
         source_label = "Auto-detected app" if is_detected else "Registered app"
         print_info("Running", f"{source_label} [accent]{app_or_exe}[/accent] -> [bold]{exe_path}[/bold] {' '.join(combined_args[1:])}")
-        exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version, app_winetricks=app_winetricks)
+        exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version, app_winetricks=app_winetricks, latencyflex_override=app_latencyflex)
     else:
         # Check if it's a file path
         # If it doesn't exist, we still try to execute it in case it's in the Wine path (like notepad)
@@ -150,9 +177,9 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
     sys.exit(exit_code)
 
 @cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("name")
-@click.argument("exe", required=False)
-@click.argument("args", nargs=-1)
+@click.argument("name", metavar="<NAME>")
+@click.argument("exe", required=False, metavar="[EXE_PATH]")
+@click.argument("args", nargs=-1, metavar="[ARGS...]")
 @click.option("--env", "-e", multiple=True, help="Environment variables in KEY=VALUE format.")
 @click.option("--workdir", "-w", help="Working directory for the app.")
 @click.option("--win-version", help="App-specific Windows version (e.g. win95, winxp).")
@@ -160,8 +187,17 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--runner", help="App-specific Wine runner override.")
 @click.option("--runner-version", help="App-specific Wine runner version override.")
 @click.option("--tricks", "-t", multiple=True, help="App-specific Winetricks components (can specify multiple times).")
-def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...]):
-    """Add a new application to distillery.json."""
+@click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support for this application.")
+def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool]):
+    """Add a new application to distillery.json.
+
+    <NAME> is the unique registry name for the application.
+
+    [EXE_PATH] is the Windows executable (.exe) path. This is required unless
+    registering a known auto-detected application by name.
+
+    [ARGS...] are the default arguments to pass to the executable.
+    """
     project = ensure_project()
     
     target_exe = exe
@@ -202,14 +238,18 @@ def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ..
         wine_arch=arch,
         runner=runner,
         runner_version=runner_version,
-        winetricks=list(tricks)
+        winetricks=list(tricks),
+        latencyflex=latencyflex
     )
     print_step("Added", f"App [accent]{name}[/accent] ([bold]{target_exe}[/bold]) to distillery.json")
 
 @cli.command(name="remove")
-@click.argument("name")
+@click.argument("name", metavar="<NAME>")
 def remove_cmd(name: str):
-    """Remove an application from distillery.json."""
+    """Remove an application from distillery.json.
+
+    <NAME> is the registry name of the application to remove.
+    """
     project = ensure_project(auto_init=False)
     if project.remove_app(name):
         print_step("Removed", f"App [accent]{name}[/accent] from distillery.json")
@@ -255,9 +295,13 @@ def list_cmd(all: bool, detected: bool):
             print_info("Scan", "No auto-detected applications found in the Wine prefix.")
 
 @cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("wine_args", nargs=-1, type=click.UNPROCESSED)
+@click.argument("wine_args", nargs=-1, type=click.UNPROCESSED, metavar="[WINE_ARGS...]")
 def wine(wine_args: Tuple[str, ...]):
-    """Run Wine commands inside the local prefix context (e.g. winecfg, regedit)."""
+    """Run Wine commands inside the local prefix context (e.g. winecfg, regedit).
+
+    [WINE_ARGS...] are arguments passed directly to wine (e.g. 'winecfg', 'regedit').
+    If no arguments are provided, defaults to running 'winecfg'.
+    """
     project = ensure_project()
     if not wine_args:
         # Default to winecfg if no args provided
@@ -270,9 +314,13 @@ def wine(wine_args: Tuple[str, ...]):
     sys.exit(exit_code)
 
 @cli.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("tricks_args", nargs=-1, type=click.UNPROCESSED)
+@click.argument("tricks_args", nargs=-1, type=click.UNPROCESSED, metavar="[TRICKS_ARGS...]")
 def winetricks(tricks_args: Tuple[str, ...]):
-    """Run winetricks in the context of the local prefix."""
+    """Run winetricks in the context of the local prefix.
+
+    [TRICKS_ARGS...] are arguments passed directly to winetricks.
+    If no arguments are provided, winetricks launches its graphical GUI.
+    """
     project = ensure_project()
     args_list = ["winetricks"] + list(tricks_args)
     if not tricks_args:
@@ -300,9 +348,12 @@ def env():
         console.print(f"export {k}={v}")
 
 @cli.command()
-@click.argument("name")
+@click.argument("name", metavar="<NAME>")
 def export(name: str):
-    """Export an application to the host Linux desktop menu."""
+    """Export an application to the host Linux desktop menu.
+
+    <NAME> is the registry name of the application to export.
+    """
     project = ensure_project()
     
     # 1. Resolve application
@@ -351,9 +402,12 @@ Categories=Wine;
         sys.exit(1)
 
 @cli.command()
-@click.argument("name")
+@click.argument("name", metavar="<NAME>")
 def unexport(name: str):
-    """Remove exported desktop launcher for an application."""
+    """Remove exported desktop launcher for an application.
+
+    <NAME> is the registry name of the application to unexport.
+    """
     project = ensure_project()
     
     desktop_dir = Path("~/.local/share/applications").expanduser()
@@ -370,6 +424,13 @@ def unexport(name: str):
             sys.exit(1)
     else:
         print_warning(f"No exported desktop launcher found at {desktop_file_path}")
+
+@cli.command()
+def easydistill():
+    """Launch the interactive TUI configuration editor for distillery.json."""
+    project = ensure_project()
+    from cheapwine.tui import run_easydistill
+    run_easydistill(project)
 
 if __name__ == "__main__":
     cli()
