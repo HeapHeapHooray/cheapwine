@@ -308,6 +308,48 @@ class TestCheapwine(unittest.TestCase):
             self.assertTrue(is_matching_arch("GE-Proton11-1-arm64.tar.gz"))
             self.assertFalse(is_matching_arch("GE-Proton11-1.tar.gz"))
 
+    @patch("subprocess.run")
+    def test_self_healing_runner(self, mock_run):
+        """Test that incompatible pre-existing runner binary is deleted and re-downloaded."""
+        from unittest.mock import patch, MagicMock
+        from cheapwine.runners import resolve_and_download_runner, RUNNERS_DIR
+        
+        # 1. Create a dummy incompatible arm64 runner binary inside runners directory
+        dummy_dir = RUNNERS_DIR / "proton-ge-8-25"
+        dummy_bin_dir = dummy_dir / "files" / "bin"
+        dummy_bin_dir.mkdir(parents=True, exist_ok=True)
+        dummy_wine = dummy_bin_dir / "wine"
+        
+        # Write ELF arm64 header: \x7fELF + 14 padding bytes + \xb7\x00 (machine 0xb7 = arm64)
+        elf_header = b"\x7fELF" + b"\x00"*14 + b"\xb7\x00"
+        dummy_wine.write_bytes(elf_header)
+        
+        # Ensure it exists
+        self.assertTrue(dummy_wine.exists())
+        
+        # Mock resolve_and_download_runner's actual download to return a clean mock path
+        # and patch platform.machine to "x86_64" so arm64 is incompatible!
+        mocked_path = dummy_bin_dir / "wine_new"
+        
+        def mock_extract_impl(archive_path, target_dir):
+            dummy_bin_dir.mkdir(parents=True, exist_ok=True)
+            mocked_path.write_text("dummy binary")
+        
+        with patch("platform.machine", return_value="x86_64"), \
+             patch("cheapwine.runners.fetch_github_release", return_value=("GE-Proton8-25", "http://dummy", "GE-Proton8-25.tar.gz")), \
+             patch("cheapwine.runners.download_file_with_progress", return_value=Path("/tmp/dummy.tar.gz")), \
+             patch("cheapwine.runners.extract_archive", side_effect=mock_extract_impl) as mock_extract, \
+             patch("cheapwine.runners.find_wine_binary", side_effect=[dummy_wine, mocked_path]):
+                 
+            # Run resolver. It should detect dummy_wine is arm64 (incompatible), delete it, and download!
+            resolve_and_download_runner("proton-ge-8-25")
+            
+            # Verify the incompatible runner folder was deleted
+            self.assertFalse(dummy_wine.exists())
+            
+            # Verify mock_extract was called to extract the new download
+            mock_extract.assert_called()
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])

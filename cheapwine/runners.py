@@ -60,7 +60,16 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     wine_exe_path = find_wine_binary(runner_dir)
     
     if wine_exe_path and wine_exe_path.exists():
-        return str(wine_exe_path.absolute())
+        if is_binary_compatible(wine_exe_path):
+            return str(wine_exe_path.absolute())
+        else:
+            print_warning(f"Installed runner at [bold]{target_name}[/bold] has incompatible architecture. Deleting and redownloading...")
+            import shutil
+            try:
+                shutil.rmtree(runner_dir)
+            except Exception as e:
+                print_error(f"Failed to remove incompatible runner: {e}")
+                sys.exit(1)
         
     # Download and extract
     print_info("Download", f"Downloading runner {tag_name} from GitHub...")
@@ -212,3 +221,51 @@ def find_wine_binary(runner_dir: Path) -> Optional[Path]:
         return candidates[0]
         
     return None
+
+def check_elf_binary_architecture(path: Path) -> str:
+    """Reads the ELF header of a file and returns its architecture ('x86_64', 'arm64', '32bit', or 'unknown')."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(20)
+        if len(header) < 20:
+            return "unknown"
+        # Check ELF magic number
+        if header[:4] != b"\x7fELF":
+            return "unknown"
+        
+        # Machine is at byte 18-19 in ELF header (little-endian)
+        machine = int.from_bytes(header[18:20], byteorder="little")
+        if machine == 0x3e:
+            return "x86_64"
+        elif machine == 0xb7:
+            return "arm64"
+        elif machine in [0x03, 0x28]:
+            return "32bit"
+        else:
+            return "unknown"
+    except Exception:
+        return "unknown"
+
+def is_binary_compatible(path: Path) -> bool:
+    """Checks if the ELF binary is compatible with the host architecture."""
+    host = platform.machine().lower()
+    
+    # Normalize host
+    if host in ["x86_64", "amd64", "x64"]:
+        host_norm = "x86_64"
+    elif host in ["aarch64", "arm64"]:
+        host_norm = "arm64"
+    else:
+        host_norm = host
+        
+    binary_arch = check_elf_binary_architecture(path)
+    if binary_arch == "unknown":
+        # If it's a shell script wrapper (like Proton script) or not ELF, we assume True
+        return True
+        
+    if host_norm == "x86_64":
+        return binary_arch in ["x86_64", "32bit"] # 32-bit can run on 64-bit host
+    elif host_norm == "arm64":
+        return binary_arch in ["arm64", "32bit"] # ARM 32-bit/64-bit
+        
+    return True
