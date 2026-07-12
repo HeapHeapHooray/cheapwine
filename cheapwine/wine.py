@@ -14,6 +14,14 @@ def get_wine_prefix_path(project: Project, wine_arch_override: Optional[str] = N
         return project.root_dir / f".cheapwine_{wine_arch_override}"
     return project.prefix_path
 
+def resolve_runner_command(runner: str) -> str:
+    """Resolves a runner name. If it matches a downloadable runner, downloads and returns the absolute path."""
+    from cheapwine.runners import resolve_and_download_runner
+    downloaded_path = resolve_and_download_runner(runner)
+    if downloaded_path:
+        return downloaded_path
+    return runner
+
 def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None) -> Dict[str, str]:
     """Generates the environment dictionary for Wine execution."""
     config = project.load_config()
@@ -29,7 +37,8 @@ def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, win
     env["WINEARCH"] = arch
     
     # Set WINE runner path for helpers (like winetricks)
-    runner = runner_override or config.get("runner") or "wine"
+    raw_runner = runner_override or config.get("runner") or "wine"
+    runner = resolve_runner_command(raw_runner)
     runner_parts = shlex.split(runner)
     if runner_parts:
         env["WINE"] = runner_parts[0]
@@ -59,12 +68,13 @@ def init_prefix(project: Project, force: bool = False, wine_arch_override: Optio
     # Create the parent directory if needed
     prefix_path.parent.mkdir(parents=True, exist_ok=True)
     
-    print_info("Prefix", f"Initializing Wine prefix at [accent]./{prefix_path.name}[/accent] ({wine_arch})...")
+    raw_runner = runner_override or config.get("runner") or "wine"
+    print_info("Prefix", f"Initializing Wine prefix at [accent]./{prefix_path.name}[/accent] ({wine_arch}) using runner [bold]{raw_runner}[/bold]...")
     
-    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+    runner = resolve_runner_command(raw_runner)
+    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner)
     env["WINEDEBUG"] = "-all"
     
-    runner = runner_override or config.get("runner") or "wine"
     runner_parts = shlex.split(runner)
     boot_cmd = runner_parts + ["wineboot", "-u"]
     
@@ -80,9 +90,9 @@ def init_prefix(project: Project, force: bool = False, wine_arch_override: Optio
             )
         print_step("Initialized", f"Wine prefix successfully created at ./{prefix_path.name}")
         # Apply configurations like Windows version
-        sync_prefix_settings(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+        sync_prefix_settings(project, wine_arch_override=wine_arch_override, runner_override=runner)
         # Disable winemenubuilder to prevent host menu integration spam
-        disable_host_integration(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
+        disable_host_integration(project, wine_arch_override=wine_arch_override, runner_override=runner)
         return True
     except subprocess.CalledProcessError as e:
         print_error(f"Failed to initialize Wine prefix: {e}")
@@ -101,7 +111,8 @@ def sync_prefix_settings(project: Project, wine_arch_override: Optional[str] = N
     env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override)
     env["WINEDEBUG"] = "-all"
     
-    runner = runner_override or config.get("runner") or "wine"
+    raw_runner = runner_override or config.get("runner") or "wine"
+    runner = resolve_runner_command(raw_runner)
     runner_parts = shlex.split(runner)
     
     try:
@@ -165,8 +176,8 @@ def execute_command(
         if first_arg == "winetricks":
             final_cmd = resolved_args
         else:
-            config = project.load_config()
-            runner = runner_override or config.get("runner") or "wine"
+            raw_runner = runner_override or config.get("runner") or "wine"
+            runner = resolve_runner_command(raw_runner)
             runner_parts = shlex.split(runner)
             final_cmd = runner_parts + resolved_args
             
@@ -204,7 +215,8 @@ def set_app_win_version(project: Project, exe_name: str, win_version: str, wine_
     filename = Path(exe_name).name
     
     config = project.load_config()
-    runner = runner_override or config.get("runner") or "wine"
+    raw_runner = runner_override or config.get("runner") or "wine"
+    runner = resolve_runner_command(raw_runner)
     runner_parts = shlex.split(runner)
     
     try:
@@ -229,7 +241,8 @@ def disable_host_integration(project: Project, wine_arch_override: Optional[str]
     env["WINEDEBUG"] = "-all"
     
     config = project.load_config()
-    runner = runner_override or config.get("runner") or "wine"
+    raw_runner = runner_override or config.get("runner") or "wine"
+    runner = resolve_runner_command(raw_runner)
     runner_parts = shlex.split(runner)
     
     try:

@@ -6,6 +6,7 @@ from pathlib import Path
 from click.testing import CliRunner
 from cheapwine.cli import cli
 from cheapwine.project import Project
+from unittest.mock import patch
 
 class TestCheapwine(unittest.TestCase):
     def setUp(self):
@@ -233,6 +234,33 @@ class TestCheapwine(unittest.TestCase):
         result_list = self.runner.invoke(cli, ["list"])
         self.assertEqual(result_list.exit_code, 1)
         self.assertIn("No cheapwine project found. Run cheapwine init to start one.", result_list.output)
+
+    @patch("subprocess.run")
+    def test_runner_auto_download(self, mock_run):
+        """Test auto-downloading when a downloadable runner is specified."""
+        from unittest.mock import patch, MagicMock
+        
+        # Configure subprocess.run to simulate success
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        # Mock resolve_and_download_runner to simulate successful download without hitting GitHub
+        mocked_path = "/home/heap/.local/share/cheapwine/runners/proton-ge-8-25/files/bin/wine"
+        with patch("cheapwine.runners.resolve_and_download_runner", return_value=mocked_path) as mock_download:
+            result_init = self.runner.invoke(cli, ["init", "--runner", "proton-ge-8-25"])
+            self.assertEqual(result_init.exit_code, 0)
+            
+            # Verify resolve_and_download_runner was called with the runner name
+            mock_download.assert_any_call("proton-ge-8-25")
+            
+            # Verify it printed the runner used (robust against console wrapping)
+            self.assertIn("using runner", result_init.output)
+            self.assertIn("proton-ge-8-25", result_init.output)
+            
+            # Verify distillery.json stored it
+            config_path = self.test_dir / "distillery.json"
+            with open(config_path, "r") as f:
+                data = json.load(f)
+            self.assertEqual(data["runner"], "proton-ge-8-25")
 
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
