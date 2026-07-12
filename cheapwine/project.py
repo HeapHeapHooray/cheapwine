@@ -56,6 +56,7 @@ class Project:
             "wine_version": "system",
             "win_version": "win10",
             "runner": "wine",
+            "winetricks": [],
             "env": {
                 "WINEDEBUG": "-all"
             },
@@ -81,7 +82,7 @@ class Project:
         config = self.load_config()
         return config.get("apps", {}).get(app_name)
 
-    def add_app(self, app_name: str, exe_path: str, args: list = None, env: dict = None, workdir: str = None, win_version: str = None, wine_arch: str = None, runner: str = None, runner_version: str = None) -> Dict[str, Any]:
+    def add_app(self, app_name: str, exe_path: str, args: list = None, env: dict = None, workdir: str = None, win_version: str = None, wine_arch: str = None, runner: str = None, runner_version: str = None, winetricks: list = None) -> Dict[str, Any]:
         """Adds or updates an app in distillery.json."""
         config = self.load_config()
         if "apps" not in config:
@@ -102,6 +103,8 @@ class Project:
             app_config["runner"] = runner
         if runner_version:
             app_config["runner_version"] = runner_version
+        if winetricks:
+            app_config["winetricks"] = winetricks
             
         config["apps"][app_name] = app_config
         self.save_config(config)

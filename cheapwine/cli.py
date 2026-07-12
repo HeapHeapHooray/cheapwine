@@ -126,6 +126,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         app_wine_arch = app_config.get("wine_arch")
         app_runner = app_config.get("runner")
         app_runner_version = app_config.get("runner_version")
+        app_winetricks = app_config.get("winetricks")
         if app_win_ver:
             set_app_win_version(project, exe_path, app_win_ver, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version)
             
@@ -138,7 +139,7 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
         
         source_label = "Auto-detected app" if is_detected else "Registered app"
         print_info("Running", f"{source_label} [accent]{app_or_exe}[/accent] -> [bold]{exe_path}[/bold] {' '.join(combined_args[1:])}")
-        exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version)
+        exit_code = execute_command(project, combined_args, app_env=env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version, app_winetricks=app_winetricks)
     else:
         # Check if it's a file path
         # If it doesn't exist, we still try to execute it in case it's in the Wine path (like notepad)
@@ -158,7 +159,8 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--arch", type=click.Choice(["win32", "win64"]), help="App-specific Wine architecture override.")
 @click.option("--runner", help="App-specific Wine runner override.")
 @click.option("--runner-version", help="App-specific Wine runner version override.")
-def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str):
+@click.option("--tricks", "-t", multiple=True, help="App-specific Winetricks components (can specify multiple times).")
+def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...]):
     """Add a new application to distillery.json."""
     project = ensure_project()
     
@@ -199,7 +201,8 @@ def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ..
         win_version=win_version,
         wine_arch=arch,
         runner=runner,
-        runner_version=runner_version
+        runner_version=runner_version,
+        winetricks=list(tricks)
     )
     print_step("Added", f"App [accent]{name}[/accent] ([bold]{target_exe}[/bold]) to distillery.json")
 

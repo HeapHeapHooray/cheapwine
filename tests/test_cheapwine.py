@@ -422,6 +422,58 @@ class TestCheapwine(unittest.TestCase):
             self.assertEqual(result_run.exit_code, 0)
             mock_download.assert_any_call("wine-ge-8-26")
 
+    @patch("subprocess.run")
+    def test_declarative_winetricks(self, mock_run):
+        """Test declarative winetricks DLLs and components configuration in distillery.json."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        # 1. Initialize project and add app with tricks override
+        self.runner.invoke(cli, ["init"])
+        result_add = self.runner.invoke(cli, ["add", "mygame", "game.exe", "--tricks", "dxvk", "--tricks", "d3dcompiler_43"])
+        self.assertEqual(result_add.exit_code, 0)
+        
+        config_path = self.test_dir / "distillery.json"
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["apps"]["mygame"]["winetricks"], ["dxvk", "d3dcompiler_43"])
+        
+        # 2. Run the application
+        with patch("cheapwine.runners.ensure_winetricks", return_value="/usr/bin/winetricks"), \
+             patch("cheapwine.runners.is_binary_compatible", return_value=True):
+            
+            result_run = self.runner.invoke(cli, ["run", "mygame"])
+            self.assertEqual(result_run.exit_code, 0)
+            
+            # Verify winetricks execution occurred with correct args
+            winetricks_called = False
+            for call in mock_run.call_args_list:
+                args = call[0][0]
+                if len(args) >= 2 and args[0] == "/usr/bin/winetricks":
+                    self.assertEqual(args[1], "-q")
+                    self.assertIn("dxvk", args)
+                    self.assertIn("d3dcompiler_43", args)
+                    winetricks_called = True
+            self.assertTrue(winetricks_called)
+            
+            # Check cache state file cheapwine_tricks.json was created
+            state_file = self.test_dir / ".cheapwine" / "cheapwine_tricks.json"
+            self.assertTrue(state_file.exists())
+            with open(state_file, "r") as f:
+                state_data = json.load(f)
+            self.assertIn("dxvk", state_data)
+            self.assertIn("d3dcompiler_43", state_data)
+            
+            # Reset mock and run again. It should NOT execute winetricks since it is in cache!
+            mock_run.reset_mock()
+            result_run_again = self.runner.invoke(cli, ["run", "mygame"])
+            self.assertEqual(result_run_again.exit_code, 0)
+            
+            # Verify no winetricks execution occurred
+            for call in mock_run.call_args_list:
+                args = call[0][0]
+                self.assertNotIn("/usr/bin/winetricks", args)
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])

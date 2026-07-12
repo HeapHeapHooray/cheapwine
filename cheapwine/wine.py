@@ -1,6 +1,7 @@
 import os
 import subprocess
 import shlex
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from cheapwine.project import Project
@@ -113,6 +114,12 @@ def init_prefix(project: Project, force: bool = False, wine_arch_override: Optio
         sync_prefix_settings(project, wine_arch_override=wine_arch_override, runner_override=runner)
         # Disable winemenubuilder to prevent host menu integration spam
         disable_host_integration(project, wine_arch_override=wine_arch_override, runner_override=runner)
+        
+        # Apply global winetricks if specified in config
+        global_tricks = config.get("winetricks", [])
+        if global_tricks:
+            apply_winetricks_components(project, global_tricks, wine_arch_override=wine_arch_override, runner_override=runner)
+            
         return True
     except subprocess.CalledProcessError as e:
         print_error(f"Failed to initialize Wine prefix: {e}")
@@ -159,12 +166,29 @@ def execute_command(
     workdir: Optional[str] = None,
     wine_arch_override: Optional[str] = None,
     runner_override: Optional[str] = None,
-    runner_version_override: Optional[str] = None
+    runner_version_override: Optional[str] = None,
+    app_winetricks: Optional[List[str]] = None
 ) -> int:
     """Executes a command inside the Wine prefix context."""
     # Ensure prefix is initialized first
     init_prefix(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     
+    config = project.load_config()
+    
+    # Resolve the runner for applying winetricks
+    raw_runner = runner_override or config.get("runner") or "wine"
+    raw_version = runner_version_override or config.get("runner_version")
+    combined_runner = resolve_runner_name(raw_runner, raw_version)
+    
+    # Apply global winetricks if specified
+    global_tricks = config.get("winetricks", [])
+    if global_tricks:
+        apply_winetricks_components(project, global_tricks, wine_arch_override=wine_arch_override, runner_override=combined_runner, runner_version_override=runner_version_override)
+        
+    # Apply app-specific winetricks if specified
+    if app_winetricks:
+        apply_winetricks_components(project, app_winetricks, wine_arch_override=wine_arch_override, runner_override=combined_runner, runner_version_override=runner_version_override)
+        
     env = get_wine_env(project, app_env, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
     
     # Resolve the executable if it exists locally
@@ -287,4 +311,56 @@ def disable_host_integration(project: Project, wine_arch_override: Optional[str]
         return True
     except Exception as e:
         print_warning(f"Failed to disable host menu integration: {e}")
+        return False
+
+def apply_winetricks_components(project: Project, components: List[str], wine_arch_override: Optional[str] = None, runner_override: Optional[str] = None, runner_version_override: Optional[str] = None) -> bool:
+    """Applies a list of winetricks components to the prefix if not already applied."""
+    if not components:
+        return True
+        
+    prefix_path = get_wine_prefix_path(project, wine_arch_override)
+    prefix_path.mkdir(parents=True, exist_ok=True)
+    state_file = prefix_path / "cheapwine_tricks.json"
+    
+    # Load already applied tricks
+    applied = set()
+    if state_file.exists():
+        try:
+            with open(state_file, "r") as f:
+                applied = set(json.load(f))
+        except Exception:
+            pass
+            
+    # Filter missing components
+    missing = [c for c in components if c not in applied]
+    if not missing:
+        return True
+        
+    print_info("Winetricks", f"Applying missing winetricks components to prefix: {', '.join(missing)}")
+    
+    from cheapwine.runners import ensure_winetricks
+    winetricks_bin = ensure_winetricks()
+    
+    env = get_wine_env(project, wine_arch_override=wine_arch_override, runner_override=runner_override, runner_version_override=runner_version_override)
+    env["WINEDEBUG"] = "-all"
+    
+    cmd = [winetricks_bin, "-q"] + missing
+    
+    try:
+        with console.status(f"[bold green]Running Winetricks to apply {', '.join(missing)}..."):
+            subprocess.run(
+                cmd,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True
+            )
+        # Update applied tricks file
+        applied.update(missing)
+        with open(state_file, "w") as f:
+            json.dump(list(applied), f)
+        print_step("Winetricks", f"Successfully applied winetricks components: {', '.join(missing)}")
+        return True
+    except Exception as e:
+        print_warning(f"Failed to apply winetricks components {missing}: {e}")
         return False
