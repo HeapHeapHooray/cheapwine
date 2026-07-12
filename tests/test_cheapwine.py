@@ -262,6 +262,18 @@ class TestCheapwine(unittest.TestCase):
                 data = json.load(f)
             self.assertEqual(data["runner"], "proton-ge-8-25")
 
+    @patch("subprocess.run")
+    def test_run_unregistered_app(self, mock_run):
+        """Test running an unregistered application or command."""
+        from unittest.mock import MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        self.runner.invoke(cli, ["init"])
+        result = self.runner.invoke(cli, ["run", "notepad.exe"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Running", result.output)
+        self.assertIn("Executable/Command", result.output)
+
     def test_env_output(self):
         """Test cheapwine env exports match expected prefix paths."""
         self.runner.invoke(cli, ["init"])

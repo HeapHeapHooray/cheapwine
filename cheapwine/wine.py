@@ -176,6 +176,7 @@ def execute_command(
         if first_arg == "winetricks":
             final_cmd = resolved_args
         else:
+            config = project.load_config()
             raw_runner = runner_override or config.get("runner") or "wine"
             runner = resolve_runner_command(raw_runner)
             runner_parts = shlex.split(runner)
