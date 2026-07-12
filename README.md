@@ -13,12 +13,17 @@ A project-local Wine prefix and application manager (Wine's version of `uv`).
 
 * **Project-Local Prefixes**: Automatically sandboxes your Wine environments in `.cheapwine` inside your project directory.
 * **Declarative Distillery Settings (`distillery.json`)**: Declare architectures, Windows versions, environment variables, and application commands in a single, portable JSON file.
-* **Runner Overrides**: Use system Wine, Proton (via Steam), Wine-GE, Bottles, or custom-compiled Wine builds, both globally and overridden per application.
+* **Runner Overrides**: Use system Wine, Proton (via Steam), Wine-GE, Kron4ek, Soda, or custom-compiled Wine builds, both globally and overridden per application.
+* **Runner Auto-Downloads**: Automatically download Wine-GE, Proton-GE, Kron4ek, and Soda runners from GitHub by name (e.g. `wine-ge-8-26`, `kron4ek-9.0`).
+* **Custom Runner Versions**: Pin specific runner versions (e.g. `wine-ge-8-26`) globally or per application.
+* **Declarative Winetricks**: Define winetricks components (DLLs, codecs, fonts) in `distillery.json` — applied automatically on prefix init and cached to avoid re-application.
+* **LatencyFleX Support**: Built-in LatencyFleX environment variable configuration for competitive gaming (NVIDIA Reflex-like latency reduction).
 * **Legacy 32-bit Support**: Create isolated 32-bit Wine prefixes (`win32`) on the fly, even for individual applications in a 64-bit project.
 * **Auto-Integration Spam Block**: Prevents Wine from cluttering your Linux host's desktop search menu during app installation by disabling `winemenubuilder` by default.
 * **Manual Desktop Export**: Clean CLI tools (`cheapwine export` / `cheapwine unexport`) to manually generate standard Linux desktop launchers (`.desktop` entries) for only the applications you want.
 * **Auto-Discovery Scanner**: Scans Wine Start Menu shortcuts and `drive_c/Program Files` to automatically detect newly installed programs.
 * **Beautiful CLI & Interactive TUI**: Features a clean, colorful, emoji-rich command-line output (inspired by `uv`) and a live interactive Terminal User Interface (TUI) menu for select-and-run workflows.
+* **EasyDistill TUI Editor**: Full-screen interactive configuration editor (`cheapwine easydistill`) for editing `distillery.json` without touching JSON directly.
 
 ---
 
@@ -89,6 +94,9 @@ Here is an example of a fully configured `distillery.json`:
   "wine_version": "system",
   "win_version": "win10",
   "runner": "wine",
+  "runner_version": "wine-ge-8-26",
+  "latencyflex": false,
+  "winetricks": ["corefonts", "vcrun2022"],
   "env": {
     "WINEDEBUG": "-all"
   },
@@ -103,6 +111,12 @@ Here is an example of a fully configured `distillery.json`:
       "win_version": "win95",
       "wine_arch": "win32",
       "runner": "/home/user/wine-ge/bin/wine"
+    },
+    "my_game": {
+      "exe": "C:\\Games\\game.exe",
+      "latencyflex": true,
+      "winetricks": ["d3dx11_43", "dxvk"],
+      "args": ["-dx11"]
     }
   }
 }
@@ -133,23 +147,62 @@ cheapwine init --runner "/home/user/.steam/steam/compatibilitytools.d/GE-Proton8
 cheapwine add "SteamApp" "game.exe" --runner "proton run"
 ```
 
+### Auto-Downloading Runners by Name
+Specify a downloadable runner by name and version — cheapwine fetches it from GitHub automatically:
+
+```bash
+cheapwine init --runner "wine-ge" --runner-version "8-26"
+cheapwine init --runner "proton-ge" --runner-version "8-25"
+cheapwine init --runner "kron4ek" --runner-version "9.0"
+cheapwine init --runner "soda" --runner-version "9.0-1"
+```
+
+### Declarative Winetricks
+Define winetricks components in `distillery.json` and they are applied automatically on prefix init:
+
+```bash
+cheapwine init --runner "wine-ge-8-26"
+# Then edit distillery.json to add:
+# "winetricks": ["corefonts", "vcrun2022", "dxvk"]
+```
+Components are applied on `cheapwine init` and when running an app that has them configured. Applied components are cached per prefix in `cheapwine_tricks.json` so they are only applied once.
+
+Per-application winetricks:
+```bash
+cheapwine add "MyGame" "game.exe" --tricks d3dx11_43 --tricks dxvk
+```
+
+### LatencyFleX Support
+Enable LatencyFleX globally or per-application for NVIDIA Reflex-like latency reduction in competitive games:
+
+**Globally:**
+```bash
+cheapwine init --latencyflex
+```
+
+**Per-Application:**
+```bash
+cheapwine add "CS2" "cs2.exe" --latencyflex
+```
+
 ---
 
 ## Command Reference
 
 | Command | Options | Description | Example |
 | :--- | :--- | :--- | :--- |
-| **`cheapwine init`** | `--arch [win32\|win64]`, `--win-version [win95\|winxp\|win7\|win10]`, `--runner [path]` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95` |
-| **`cheapwine run`** | `[app_or_exe]`, `[extra_args...]` | Runs a registered app or an executable path. Launches the TUI if no app is specified. | `cheapwine run notepad` |
+| **`cheapwine init`** | `--arch [win32\|win64]`, `--win-version`, `--runner`, `--runner-version`, `--latencyflex/--no-latencyflex` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95 --latencyflex` |
+| **`cheapwine run`** | `[app_or_exe]`, `[extra_args...]` | Runs a registered app or an executable path. Launches TUI if no app specified. | `cheapwine run mygame -dx11` |
 | **`cheapwine tui`** | *None* | Launches the interactive arrow-key select menu. | `cheapwine tui` |
-| **`cheapwine add`** | `--env`, `--workdir`, `--win-version`, `--arch`, `--runner` | Registers an application. If the executable path is omitted, resolves it from auto-detected apps. | `cheapwine add steam` |
-| **`cheapwine remove`**| `[app_name]` | Removes an application definition. | `cheapwine remove steam` |
+| **`cheapwine add`** | `--env`, `--workdir`, `--win-version`, `--arch`, `--runner`, `--runner-version`, `--tricks`, `--latencyflex/--no-latencyflex` | Registers an application. If EXE path omitted, resolves from auto-detected apps. | `cheapwine add steam` |
+| **`cheapwine remove`**| `<name>` | Removes an application definition. | `cheapwine remove steam` |
 | **`cheapwine list`** | `--all` / `-a`, `--detected` / `-d` | Lists registered and/or auto-detected applications. | `cheapwine list --all` |
-| **`cheapwine export`**| `[app_name]` | Generates a desktop launcher in the host Linux applications menu. | `cheapwine export "RetroGame"` |
-| **`cheapwine unexport`**| `[app_name]` | Removes an exported desktop launcher from the host. | `cheapwine unexport "RetroGame"` |
+| **`cheapwine export`**| `<name>` | Generates a desktop launcher in the host Linux applications menu. | `cheapwine export "RetroGame"` |
+| **`cheapwine unexport`**| `<name>` | Removes an exported desktop launcher from the host. | `cheapwine unexport "RetroGame"` |
 | **`cheapwine wine`** | `[wine_args...]` | Runs a Wine utility in the prefix context. Defaults to `winecfg`. | `cheapwine wine regedit` |
 | **`cheapwine winetricks`**| `[tricks_args...]` | Runs `winetricks` inside the local prefix context. | `cheapwine winetricks corefonts` |
 | **`cheapwine env`** | *None* | Prints shell export commands to manually hook your terminal into the prefix. | `cheapwine env` |
+| **`cheapwine easydistill`**| *None* | Launches the interactive TUI configuration editor for `distillery.json`. | `cheapwine easydistill` |
 
 ---
 
