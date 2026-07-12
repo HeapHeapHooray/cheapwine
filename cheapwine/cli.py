@@ -6,7 +6,7 @@ from typing import List, Tuple, Optional
 
 from cheapwine import __version__
 from cheapwine.project import Project
-from cheapwine.wine import init_prefix, execute_command, sync_prefix_settings, set_app_win_version
+from cheapwine.wine import init_prefix, execute_command, sync_prefix_settings, set_app_win_version, get_wine_prefix_path
 from cheapwine.utils import console, print_info, print_step, print_error, print_warning
 
 def ensure_project(start_dir: Path = None, auto_init: bool = False) -> Project:
@@ -347,6 +347,191 @@ def env():
     for k, v in proj_env.items():
         console.print(f"export {k}={v}")
 
+def extract_exe_icon(exe_path: Path, icon_name: str) -> bool:
+    """Extract application icon from a Windows executable and install it for the host desktop."""
+    try:
+        import pefile
+        from PIL import Image
+        import io
+    except ImportError as e:
+        print_warning(f"Icon extraction requires pefile and Pillow: {e}")
+        return False
+
+    icons_dir = Path("~/.local/share/icons").expanduser()
+
+    try:
+        pe = pefile.PE(str(exe_path))
+    except Exception as e:
+        print_warning(f"Could not parse PE file {exe_path}: {e}")
+        return False
+
+    try:
+        rt_group_icon = [e for e in pe.DIRECTORY_ENTRY_RESOURCE.entries if e.id == pefile.RESOURCE_TYPE["RT_GROUP_ICON"]]
+        if not rt_group_icon:
+            print_info("Icon", "No RT_GROUP_ICON resources found in executable")
+            return False
+        rt_icon = [e for e in pe.DIRECTORY_ENTRY_RESOURCE.entries if e.id == pefile.RESOURCE_TYPE["RT_ICON"]]
+        if not rt_icon:
+            print_info("Icon", "No RT_ICON resources found in executable")
+            return False
+
+        print_info("Icon", f"Found {len(rt_group_icon)} group icon(s), {sum(len(list(t.directory.entries)) for t in rt_icon)} total icon(s)")
+
+        # Build .ico file from RT_GROUP_ICON and RT_ICON resources
+        for group_type_entry in rt_group_icon:
+            try:
+                # Navigate: Type -> ID -> Language -> Data
+                group_id_entry = list(group_type_entry.directory.entries)[0]
+                group_lang_entry = list(group_id_entry.directory.entries)[0]
+                data_rva = group_lang_entry.data.struct.OffsetToData
+                data_size = group_lang_entry.data.struct.Size
+                group_data = pe.get_memory_mapped_image()[data_rva:data_rva + data_size]
+            except Exception:
+                continue
+
+            count = int.from_bytes(group_data[4:6], "little")
+            icon_data_chunks = []
+            icon_sizes = []
+
+            for i in range(count):
+                entry_offset = 6 + i * 14
+                entry = group_data[entry_offset:entry_offset + 14]
+                w = entry[0] or 256
+                h = entry[1] or 256
+                nid = int.from_bytes(entry[12:14], "little")
+
+                # Find matching RT_ICON by ID (not language)
+                for icon_type_entry in rt_icon:
+                    try:
+                        for icon_id_entry in list(icon_type_entry.directory.entries):
+                            if icon_id_entry.id == nid:
+                                icon_lang_entry = list(icon_id_entry.directory.entries)[0]
+                                rva = icon_lang_entry.data.struct.OffsetToData
+                                size = icon_lang_entry.data.struct.Size
+                                icon_raw = pe.get_memory_mapped_image()[rva:rva + size]
+                                icon_data_chunks.append(icon_raw)
+                                icon_sizes.append((w, h))
+                                break
+                    except Exception:
+                        continue
+
+            if not icon_data_chunks:
+                continue
+
+            ico_buf = io.BytesIO()
+            ico_buf.write(b"\x00\x00\x01\x00")
+            ico_buf.write(count.to_bytes(2, "little"))
+            offset = 6 + count * 16
+            for i, raw in enumerate(icon_data_chunks):
+                w = min(icon_sizes[i][0], 255)
+                h = min(icon_sizes[i][1], 255)
+                ico_buf.write(bytes([w, h, 0, 0]))
+                ico_buf.write(b"\x01\x00")
+                ico_buf.write(b"\x20\x00")
+                ico_buf.write(len(raw).to_bytes(4, "little"))
+                ico_buf.write(offset.to_bytes(4, "little"))
+                offset += len(raw)
+            for raw in icon_data_chunks:
+                ico_buf.write(raw)
+            ico_buf.seek(0)
+
+            try:
+                img = Image.open(ico_buf)
+                n_frames = getattr(img, "n_frames", 1)
+                print_info("Icon", f"ICO has {n_frames} frame(s)")
+                saved = 0
+                for i in range(n_frames):
+                    img.seek(i)
+                    w, h = img.size
+                    target = icons_dir / "hicolor" / f"{w}x{h}" / "apps" / f"{icon_name}.png"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    img.save(target, "PNG")
+                    saved += 1
+                if saved:
+                    print_info("Icon", f"Extracted {saved} icon size(s) to {icons_dir / 'hicolor'}")
+                    return True
+            except Exception:
+                continue
+
+        return False
+    finally:
+        try:
+            pe.close()
+        except Exception:
+            pass
+
+
+def find_app_uri_schemes(prefix_path: Path, exe_name: str) -> List[str]:
+    """Scan Wine registry for URI schemes registered by the given executable."""
+    schemes = []
+    needle = exe_name.lower().replace("/", "\\")
+
+    for reg_file in ["user.reg", "system.reg"]:
+        path = prefix_path / reg_file
+        if not path.exists():
+            continue
+
+        raw = path.read_bytes()
+        text = raw.decode("utf-16-le", errors="replace") if raw[:2] == b"\xff\xfe" else raw.decode("utf-8", errors="replace")
+
+        current_key = ""
+        has_url_protocol = False
+        # Map from key name to whether it has URL Protocol set
+        url_keys = {}
+
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                current_key = line[1:-1]
+                has_url_protocol = False
+            elif '"URL Protocol"' in line:
+                has_url_protocol = True
+                url_keys[current_key] = False
+            elif has_url_protocol and current_key and line.startswith("@="):
+                cmd = line[3:].strip('"')
+                if needle in cmd.lower():
+                    url_keys[current_key] = True
+
+        for key, matched in url_keys.items():
+            if not matched:
+                continue
+            parts = key.split("\\")
+            if len(parts) >= 2 and parts[0].lower() == "hkey_classes_root":
+                scheme = parts[1]
+                if scheme not in schemes:
+                    schemes.append(scheme)
+
+    return schemes
+
+
+@cli.command(context_settings=dict(ignore_unknown_options=True))
+@click.argument("url", metavar="<URL>")
+def uri(url: str):
+    """Handle a URI from the host system via the exported application's protocol.
+
+    Parses a URI and launches the matching registered application.
+    The URI is passed as an argument to the application.
+    """
+    project = ensure_project()
+    scheme = url.split(":")[0].lower()
+
+    config = project.load_config()
+    for app_name, app_info in config.get("apps", {}).items():
+        exe_path = app_info.get("exe", "")
+        exe_name = Path(exe_path.replace("C:\\", "").replace("\\", "/") if "C:\\" in exe_path else exe_path).name
+        wine_arch = app_info.get("wine_arch")
+        prefix = get_wine_prefix_path(project, wine_arch)
+        app_schemes = find_app_uri_schemes(prefix, exe_name)
+        if scheme in app_schemes:
+            extra_args = [url]
+            run.callback(app_or_exe=app_name, extra_args=tuple(extra_args))
+            return
+
+    print_error(f"No registered application handles the URI scheme '{scheme}'.")
+    print_info("Hint", "Use [command]cheapwine export <app>[/command] to register an application and its URI schemes.")
+    sys.exit(1)
+
+
 @cli.command()
 @click.argument("name", metavar="<NAME>")
 def export(name: str):
@@ -376,27 +561,75 @@ def export(name: str):
         print_error(f"Application [accent]{name}[/accent] not found in registered or auto-detected apps.")
         sys.exit(1)
         
-    # 2. Generate .desktop file
+    # 2. Resolve the cheapwine binary path for the desktop launcher
+    import shutil
+    cheapwine_path = shutil.which("cheapwine") or shutil.which("cw") or "cheapwine"
+    
+    safe_proj_name = project.root_dir.name.replace(" ", "_").lower()
+    safe_app_name = name.replace(" ", "_").lower()
+    
+    # 3. Extract application icon from the exe
+    wine_arch = app_config.get("wine_arch") if app_config else None
+    prefix = get_wine_prefix_path(project, wine_arch)
+    
+    # Resolve the exe path within the Wine prefix
+    full_exe_path = None
+    if "C:\\" in exe_path or "c:\\" in exe_path:
+        relative = exe_path.replace("C:\\", "").replace("c:\\", "").replace("\\", "/")
+        full_exe_path = prefix / "drive_c" / relative
+    elif "\\" in exe_path:
+        relative = exe_path.replace("\\", "/")
+        full_exe_path = prefix / "drive_c" / relative
+    elif "/" in exe_path:
+        full_exe_path = Path(exe_path)
+    else:
+        # Bare filename like "notepad.exe" — search the prefix
+        full_exe_path = prefix / "drive_c" / "windows" / exe_path
+    
+    print_info("Icon", f"Looking for exe at: {full_exe_path}")
+    
+    icon_name = f"cheapwine-{safe_proj_name}-{safe_app_name}"
+    icon_extracted = extract_exe_icon(full_exe_path, icon_name) if full_exe_path and full_exe_path.exists() else False
+    if not icon_extracted:
+        print_info("Icon", "Falling back to default wine icon")
+    
+    # 4. Detect URI schemes registered by the application in the Wine prefix
+    exe_name = Path(exe_path.replace("C:\\", "").replace("\\", "/") if "C:\\" in exe_path else exe_path).name
+    app_schemes = find_app_uri_schemes(prefix, exe_name)
+    
+    # 5. Generate .desktop file
     desktop_dir = Path("~/.local/share/applications").expanduser()
     desktop_dir.mkdir(parents=True, exist_ok=True)
     
-    # Filename format: cheapwine-<project_name>-<app_name>.desktop
-    safe_proj_name = project.root_dir.name.replace(" ", "_").lower()
-    safe_app_name = name.replace(" ", "_").lower()
     desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
+    
+    mime_types = ";".join(f"x-scheme-handler/{s}" for s in app_schemes)
+    mime_line = f"MimeType={mime_types};\n" if app_schemes else ""
     
     content = f"""[Desktop Entry]
 Name={project.root_dir.name} - {name}
-Exec=cheapwine run {name}
+Exec={cheapwine_path} run {name}
 Path={project.root_dir.absolute()}
-Icon=wine
+Icon={icon_name if icon_extracted else "wine"}
 Terminal=false
 Type=Application
 Categories=Wine;
-"""
+{mime_line}"""
     try:
         desktop_file_path.write_text(content, encoding="utf-8")
-        print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher: [bold]{desktop_file_path.name}[/bold]")
+        
+        # Register each URI scheme with xdg-mime
+        if app_schemes:
+            import subprocess
+            for scheme in app_schemes:
+                subprocess.run(
+                    ["xdg-mime", "default", desktop_file_path.name, f"x-scheme-handler/{scheme}"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+                )
+            schemes_str = ", ".join(app_schemes)
+            print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher + URI schemes: {schemes_str}")
+        else:
+            print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher: [bold]{desktop_file_path.name}[/bold]")
     except Exception as e:
         print_error(f"Failed to export application: {e}")
         sys.exit(1)
