@@ -188,7 +188,8 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--runner-version", help="App-specific Wine runner version override.")
 @click.option("--tricks", "-t", multiple=True, help="App-specific Winetricks components (can specify multiple times).")
 @click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support for this application.")
-def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool]):
+@click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register for this app (e.g. flstudio). Can specify multiple times.")
+def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], uri_scheme: Tuple[str, ...]):
     """Add a new application to distillery.json.
 
     <NAME> is the unique registry name for the application.
@@ -239,9 +240,11 @@ def add(name: str, exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ..
         runner=runner,
         runner_version=runner_version,
         winetricks=list(tricks),
-        latencyflex=latencyflex
+        latencyflex=latencyflex,
+        uri_schemes=list(uri_scheme) if uri_scheme else None
     )
-    print_step("Added", f"App [accent]{name}[/accent] ([bold]{target_exe}[/bold]) to distillery.json")
+    scheme_hint = f" --uri-scheme {' --uri-scheme '.join(uri_scheme)}" if uri_scheme else ""
+    print_step("Added", f"App [accent]{name}[/accent] ([bold]{target_exe}[/bold]) to distillery.json{scheme_hint}")
 
 @cli.command(name="remove")
 @click.argument("name", metavar="<NAME>")
@@ -474,32 +477,26 @@ def find_app_uri_schemes(prefix_path: Path, exe_name: str) -> List[str]:
         raw = path.read_bytes()
         text = raw.decode("utf-16-le", errors="replace") if raw[:2] == b"\xff\xfe" else raw.decode("utf-8", errors="replace")
 
+        url_protocol_keys = set()
         current_key = ""
-        has_url_protocol = False
-        # Map from key name to whether it has URL Protocol set
-        url_keys = {}
 
         for line in text.splitlines():
             line = line.strip()
             if line.startswith("[") and line.endswith("]"):
                 current_key = line[1:-1]
-                has_url_protocol = False
             elif '"URL Protocol"' in line:
-                has_url_protocol = True
-                url_keys[current_key] = False
-            elif has_url_protocol and current_key and line.startswith("@="):
+                url_protocol_keys.add(current_key)
+            elif line.startswith("@="):
                 cmd = line[3:].strip('"')
                 if needle in cmd.lower():
-                    url_keys[current_key] = True
-
-        for key, matched in url_keys.items():
-            if not matched:
-                continue
-            parts = key.split("\\")
-            if len(parts) >= 2 and parts[0].lower() == "hkey_classes_root":
-                scheme = parts[1]
-                if scheme not in schemes:
-                    schemes.append(scheme)
+                    for pk in url_protocol_keys:
+                        if current_key.startswith(pk + "\\"):
+                            parts = pk.split("\\")
+                            if len(parts) >= 2 and parts[0].lower() == "hkey_classes_root":
+                                scheme = parts[1]
+                                if scheme not in schemes:
+                                    schemes.append(scheme)
+                            break
 
     return schemes
 
@@ -512,29 +509,84 @@ def uri(url: str):
     Parses a URI and launches the matching registered application.
     The URI is passed as an argument to the application.
     """
+    import tempfile, datetime, urllib.parse
+    log = Path(tempfile.gettempdir()) / "cheapwine-uri.log"
+
+    # Some desktop environments/browsers pass URL-encoded URIs via %u
+    url = urllib.parse.unquote(url)
+
     project = ensure_project()
+
     scheme = url.split(":")[0].lower()
+    with open(log, "a") as f:
+        f.write(f"[{datetime.datetime.now()}] uri called url={url} scheme={scheme}\n")
 
     config = project.load_config()
     for app_name, app_info in config.get("apps", {}).items():
+        # Check explicit URI schemes from config first
+        config_schemes = [s.lower() for s in app_info.get("uri_schemes", [])]
+        if scheme in config_schemes:
+            with open(log, "a") as f:
+                f.write(f"[{datetime.datetime.now()}] matched explicit scheme app={app_name}\n")
+            _launch_app_from_uri(project, app_name, app_info, url)
+            return
+
+        # Fall back to registry detection
         exe_path = app_info.get("exe", "")
         exe_name = Path(exe_path.replace("C:\\", "").replace("\\", "/") if "C:\\" in exe_path else exe_path).name
         wine_arch = app_info.get("wine_arch")
         prefix = get_wine_prefix_path(project, wine_arch)
         app_schemes = find_app_uri_schemes(prefix, exe_name)
         if scheme in app_schemes:
-            extra_args = [url]
-            run.callback(app_or_exe=app_name, extra_args=tuple(extra_args))
+            with open(log, "a") as f:
+                f.write(f"[{datetime.datetime.now()}] matched registry scheme app={app_name} schemes={app_schemes}\n")
+            _launch_app_from_uri(project, app_name, app_info, url)
             return
+        else:
+            with open(log, "a") as f:
+                f.write(f"[{datetime.datetime.now()}] no match app={app_name} registry_schemes={app_schemes}\n")
 
+    with open(log, "a") as f:
+        f.write(f"[{datetime.datetime.now()}] ERROR: no app matched scheme={scheme}\n")
     print_error(f"No registered application handles the URI scheme '{scheme}'.")
     print_info("Hint", "Use [command]cheapwine export <app>[/command] to register an application and its URI schemes.")
     sys.exit(1)
 
 
+def _launch_app_from_uri(project, app_name, app_info, url):
+    """Launch an app directly with a URI argument, bypassing the run command."""
+    from cheapwine.wine import execute_command, set_app_win_version
+
+    exe_path = app_info.get("exe", "")
+    app_args = app_info.get("args", [])
+    app_env = app_info.get("env", {})
+    workdir = app_info.get("workdir")
+    app_win_ver = app_info.get("win_version")
+    app_wine_arch = app_info.get("wine_arch")
+    app_runner = app_info.get("runner")
+    app_runner_version = app_info.get("runner_version")
+    app_winetricks = app_info.get("winetricks")
+    app_latencyflex = app_info.get("latencyflex")
+
+    if app_win_ver:
+        set_app_win_version(project, exe_path, app_win_ver, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version)
+
+    combined_args = [exe_path] + app_args + [url]
+
+    # Write debug log
+    import tempfile, datetime
+    log = Path(tempfile.gettempdir()) / "cheapwine-uri.log"
+    with open(log, "a") as f:
+        f.write(f"[{datetime.datetime.now()}] app={app_name} url={url} cmd={' '.join(combined_args)}\n")
+
+    exit_code = execute_command(project, combined_args, app_env=app_env, workdir=workdir, wine_arch_override=app_wine_arch, runner_override=app_runner, runner_version_override=app_runner_version, app_winetricks=app_winetricks, latencyflex_override=app_latencyflex)
+    sys.exit(exit_code)
+
+
 @cli.command()
 @click.argument("name", metavar="<NAME>")
-def export(name: str):
+@click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register (e.g. flstudio). Can specify multiple times.")
+def export(name: str, uri_scheme: Tuple[str, ...]):
     """Export an application to the host Linux desktop menu.
 
     <NAME> is the registry name of the application to export.
@@ -560,7 +612,12 @@ def export(name: str):
     if not exe_path:
         print_error(f"Application [accent]{name}[/accent] not found in registered or auto-detected apps.")
         sys.exit(1)
-        
+    
+    # If app was auto-detected (not registered), register it now so we can persist URI schemes
+    if app_config is None:
+        print_info("Register", f"Auto-registering [accent]{name}[/accent] in distillery.json")
+        app_config = project.add_app(app_name=name, exe_path=exe_path, uri_schemes=list(uri_scheme) if uri_scheme else None)
+    
     # 2. Resolve the cheapwine binary path for the desktop launcher
     import shutil
     cheapwine_path = shutil.which("cheapwine") or shutil.which("cw") or "cheapwine"
@@ -597,35 +654,71 @@ def export(name: str):
     exe_name = Path(exe_path.replace("C:\\", "").replace("\\", "/") if "C:\\" in exe_path else exe_path).name
     app_schemes = find_app_uri_schemes(prefix, exe_name)
     
-    # 5. Generate .desktop file
+    # Merge with explicit URI schemes from config or CLI
+    config_schemes = app_config.get("uri_schemes", []) if app_config else []
+    explicit_schemes = list(uri_scheme) if uri_scheme else config_schemes
+    app_schemes = list(dict.fromkeys(app_schemes + explicit_schemes))  # deduplicate preserving order
+    
+    # Fallback: infer URI scheme from exe's parent directory name
+    # e.g. ".../FL Studio 2026/FL64.exe" -> parent dir "FL Studio 2026" -> "flstudio"
+    if not app_schemes and full_exe_path:
+        import re
+        parent = full_exe_path.parent.name
+        # Strip trailing version numbers like " 2026", " 9.0", " 2.0.1"
+        name_part = re.sub(r'\s*\d[\d.]*\s*$', '', parent).strip()
+        inferred = name_part.lower().replace(' ', '').replace('-', '')
+        # Also fall back to exe stem if directory name yields nothing
+        if not inferred:
+            inferred = Path(exe_name).stem.lower()
+        if inferred:
+            app_schemes = [inferred]
+            print_info("Inferred", f"URI scheme [accent]{inferred}[/accent] from executable's parent directory")
+    
+    # Persist uri_schemes back to distillery.json so `cheapwine uri` can find them
+    if app_schemes and app_config is not None:
+        app_config["uri_schemes"] = app_schemes
+        config = project.load_config()
+        config["apps"][name] = app_config
+        project.save_config(config)
+    
+    # 5. Generate .desktop file with URI scheme support baked in
     desktop_dir = Path("~/.local/share/applications").expanduser()
     desktop_dir.mkdir(parents=True, exist_ok=True)
     
     desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
     
-    mime_types = ";".join(f"x-scheme-handler/{s}" for s in app_schemes)
-    mime_line = f"MimeType={mime_types};\n" if app_schemes else ""
+    mime_line = "MimeType=" + "".join(f"x-scheme-handler/{s};" for s in app_schemes) if app_schemes else ""
     
     content = f"""[Desktop Entry]
 Name={project.root_dir.name} - {name}
-Exec={cheapwine_path} run {name}
+Exec={cheapwine_path} run {name} %u
 Path={project.root_dir.absolute()}
 Icon={icon_name if icon_extracted else "wine"}
 Terminal=false
 Type=Application
 Categories=Wine;
-{mime_line}"""
+{mime_line}
+"""
+    
     try:
         desktop_file_path.write_text(content, encoding="utf-8")
         
-        # Register each URI scheme with xdg-mime
+        # Register the main launcher as the handler for each URI scheme
         if app_schemes:
             import subprocess
             for scheme in app_schemes:
                 subprocess.run(
-                    ["xdg-mime", "default", desktop_file_path.name, f"x-scheme-handler/{scheme}"],
+                    ["xdg-mime", "default", f"{desktop_file_path.name}", f"x-scheme-handler/{scheme}"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
                 )
+                subprocess.run(
+                    ["gio", "mime", f"x-scheme-handler/{scheme}", f"{desktop_file_path.name}"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+                )
+            subprocess.run(
+                ["update-desktop-database", str(desktop_dir)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            )
             schemes_str = ", ".join(app_schemes)
             print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher + URI schemes: {schemes_str}")
         else:
@@ -657,6 +750,15 @@ def unexport(name: str):
             sys.exit(1)
     else:
         print_warning(f"No exported desktop launcher found at {desktop_file_path}")
+    
+    # Also clean up any URI handler files for this app
+    import glob
+    for handler in glob.glob(str(desktop_dir / f"cheapwine-uri-*")):
+        h = Path(handler)
+        try:
+            h.unlink()
+        except Exception:
+            pass
 
 @cli.command()
 def easydistill():

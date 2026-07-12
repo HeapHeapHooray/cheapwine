@@ -84,7 +84,7 @@ class Project:
         config = self.load_config()
         return config.get("apps", {}).get(app_name)
 
-    def add_app(self, app_name: str, exe_path: str, args: list = None, env: dict = None, workdir: str = None, win_version: str = None, wine_arch: str = None, runner: str = None, runner_version: str = None, winetricks: list = None, latencyflex: bool = None) -> Dict[str, Any]:
+    def add_app(self, app_name: str, exe_path: str, args: list = None, env: dict = None, workdir: str = None, win_version: str = None, wine_arch: str = None, runner: str = None, runner_version: str = None, winetricks: list = None, latencyflex: bool = None, uri_schemes: list = None) -> Dict[str, Any]:
         """Adds or updates an app in distillery.json."""
         config = self.load_config()
         if "apps" not in config:
@@ -109,6 +109,8 @@ class Project:
             app_config["winetricks"] = winetricks
         if latencyflex is not None:
             app_config["latencyflex"] = latencyflex
+        if uri_schemes:
+            app_config["uri_schemes"] = uri_schemes
             
         config["apps"][app_name] = app_config
         self.save_config(config)

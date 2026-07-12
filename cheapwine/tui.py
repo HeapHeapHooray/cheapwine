@@ -425,6 +425,7 @@ def run_easydistill(project: Project):
                     lfx_str = "Disabled"
                 else:
                     lfx_str = "None (inherits global)"
+                uri_schemes_str = ", ".join(app_info.get("uri_schemes", [])) or "None"
                 
                 options = [
                     {"label": f"Application Name: [accent]{selected_app_name}[/accent]", "action": "edit_app_name"},
@@ -438,6 +439,7 @@ def run_easydistill(project: Project):
                     {"label": f"Winetricks Override: [accent]{tricks}[/accent]", "action": "edit_app_tricks"},
                     {"label": f"Environment Variables: [accent]{env_count} keys[/accent]", "action": "edit_app_env"},
                     {"label": f"LatencyFleX Override: [accent]{lfx_str}[/accent]", "action": "edit_app_latencyflex"},
+                    {"label": f"URI Schemes: [accent]{uri_schemes_str}[/accent]", "action": "edit_app_uri_schemes"},
                     {"label": "[!] Delete Application from Registry", "action": "delete_app"},
                     {"label": "➔ Back to Applications List", "action": "go_apps"}
                 ]
@@ -746,6 +748,16 @@ def run_easydistill(project: Project):
                         else:
                             app_info["latencyflex"] = (selected == "Enabled")
                         project.save_config(config)
+                elif action == "edit_app_uri_schemes":
+                    app_info = config.get("apps", {}).get(selected_app_name, {})
+                    current = ", ".join(app_info.get("uri_schemes", []))
+                    val = read_text_input("Enter comma-separated URI schemes (e.g. flstudio, fruityloops)", current)
+                    schemes = [s.strip() for s in val.split(",") if s.strip()]
+                    if schemes:
+                        app_info["uri_schemes"] = schemes
+                    elif "uri_schemes" in app_info:
+                        del app_info["uri_schemes"]
+                    project.save_config(config)
                     
                 # App specific env actions
                 elif action == "edit_env_key":
