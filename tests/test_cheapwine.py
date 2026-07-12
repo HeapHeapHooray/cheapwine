@@ -196,15 +196,62 @@ class TestCheapwine(unittest.TestCase):
         desktop_dir = Path("~/.local/share/applications").expanduser()
         safe_proj_name = self.test_dir.name.replace(" ", "_").lower()
         safe_app_name = "myapp".replace(" ", "_").lower()
-        desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
+        desktop_file_path = desktop_dir / f"{safe_app_name}.desktop"
         
         self.assertTrue(desktop_file_path.exists())
+        content = desktop_file_path.read_text(encoding="utf-8")
+        self.assertIn("Name=myapp\n", content)
+        self.assertNotIn(f"Name={self.test_dir.name} - myapp\n", content)
         
         # Test unexporting
         result_unexport = self.runner.invoke(cli, ["unexport", "myapp"])
         self.assertEqual(result_unexport.exit_code, 0)
         self.assertIn("Unexported", result_unexport.output)
         self.assertFalse(desktop_file_path.exists())
+
+    def test_unexport_coexistence(self):
+        """Test that unexporting a registered app also unexports its auto-detected counterpart and vice-versa."""
+        from unittest.mock import patch
+        self.runner.invoke(cli, ["init"])
+        self.runner.invoke(cli, ["add", "steam_registered", "C:\\Program Files\\Steam\\Steam.exe"])
+        
+        desktop_dir = Path("~/.local/share/applications").expanduser()
+        safe_proj_name = self.test_dir.name.replace(" ", "_").lower()
+        
+        desktop_file_reg = desktop_dir / "steam_registered.desktop"
+        desktop_file_det = desktop_dir / "steam.desktop"
+        
+        # Helper to recreate both desktop files
+        def create_desktop_files():
+            desktop_dir.mkdir(parents=True, exist_ok=True)
+            desktop_file_reg.write_text("[Desktop Entry]\nName=Steam Registered", encoding="utf-8")
+            desktop_file_det.write_text("[Desktop Entry]\nName=Steam Detected", encoding="utf-8")
+            
+        mock_detected = [{"name": "Steam", "exe": "C:\\Program Files\\Steam\\Steam.exe", "source": "Wine Start Menu"}]
+        
+        # Test Case 1: unexporting registered app also unexports auto-detected app
+        create_desktop_files()
+        self.assertTrue(desktop_file_reg.exists())
+        self.assertTrue(desktop_file_det.exists())
+        
+        with patch("cheapwine.tui.scan_installed_apps", return_value=mock_detected):
+            result = self.runner.invoke(cli, ["unexport", "steam_registered"])
+            self.assertEqual(result.exit_code, 0)
+            
+        self.assertFalse(desktop_file_reg.exists())
+        self.assertFalse(desktop_file_det.exists())
+        
+        # Test Case 2: unexporting auto-detected app also unexports registered app
+        create_desktop_files()
+        self.assertTrue(desktop_file_reg.exists())
+        self.assertTrue(desktop_file_det.exists())
+        
+        with patch("cheapwine.tui.scan_installed_apps", return_value=mock_detected):
+            result = self.runner.invoke(cli, ["unexport", "Steam"])
+            self.assertEqual(result.exit_code, 0)
+            
+        self.assertFalse(desktop_file_reg.exists())
+        self.assertFalse(desktop_file_det.exists())
 
     def test_runner_overrides(self):
         """Test global and app-specific Wine runner overrides."""

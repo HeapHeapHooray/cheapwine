@@ -666,7 +666,7 @@ def _sync_app_desktop(project: Project, app_name: str, icon_name: Optional[str] 
 
     desktop_dir = Path("~/.local/share/applications").expanduser()
     desktop_dir.mkdir(parents=True, exist_ok=True)
-    desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
+    desktop_file_path = desktop_dir / f"{safe_app_name}.desktop"
 
     if icon_name is None:
         icon_name = "wine"
@@ -680,7 +680,7 @@ def _sync_app_desktop(project: Project, app_name: str, icon_name: Optional[str] 
     mime_line = "MimeType=" + "".join(f"x-scheme-handler/{s};" for s in app_schemes) if app_schemes else ""
 
     content = f"""[Desktop Entry]
-Name={project.root_dir.name} - {app_name}
+Name={app_name}
 Exec={cheapwine_path} run "{app_name}" %u
 Path={project.root_dir.absolute()}
 Icon={icon_name}
@@ -774,7 +774,7 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
     
     print_info("Icon", f"Looking for exe at: {full_exe_path}")
     
-    icon_name = f"cheapwine-{safe_proj_name}-{safe_app_name}"
+    icon_name = f"cheapwine-{safe_app_name}"
     icon_extracted = extract_exe_icon(full_exe_path, icon_name) if full_exe_path and full_exe_path.exists() else False
     if not icon_extracted:
         print_info("Icon", "Falling back to default wine icon")
@@ -833,19 +833,92 @@ def unexport(name: str):
     
     desktop_dir = Path("~/.local/share/applications").expanduser()
     safe_proj_name = project.root_dir.name.replace(" ", "_").lower()
-    safe_app_name = name.replace(" ", "_").lower()
-    desktop_file_path = desktop_dir / f"cheapwine-{safe_proj_name}-{safe_app_name}.desktop"
     
-    if desktop_file_path.exists():
+    # Compile a set of names to unexport
+    unexport_names = {name}
+    
+    # Find auto-detected and registered apps to check if there are matches to unexport
+    from cheapwine.tui import scan_installed_apps
+    
+    # Load registered apps
+    config = project.load_config()
+    registered_apps = config.get("apps", {})
+    
+    # Scan for auto-detected apps
+    try:
+        detected_apps = scan_installed_apps(project)
+    except Exception:
+        detected_apps = []
+        
+    def get_norm_path(p_str: str, app_conf: Optional[dict] = None) -> Optional[str]:
+        if not p_str:
+            return None
+        wine_arch = app_conf.get("wine_arch") if app_conf else None
+        prefix = get_wine_prefix_path(project, wine_arch)
+        
+        if "C:\\" in p_str or "c:\\" in p_str:
+            relative = p_str.replace("C:\\", "").replace("c:\\", "").replace("\\", "/")
+            full_path = prefix / "drive_c" / relative
+        elif "\\" in p_str:
+            relative = p_str.replace("\\", "/")
+            full_path = prefix / "drive_c" / relative
+        elif "/" in p_str:
+            full_path = Path(p_str)
+        else:
+            full_path = prefix / "drive_c" / "windows" / p_str
+            
         try:
-            desktop_file_path.unlink()
-            print_step("Unexported", f"Removed host desktop launcher: [bold]{desktop_file_path.name}[/bold]")
-        except Exception as e:
-            print_error(f"Failed to remove desktop file: {e}")
-            sys.exit(1)
-    else:
-        print_warning(f"No exported desktop launcher found at {desktop_file_path}")
+            return str(full_path.resolve().absolute()).lower()
+        except Exception:
+            return str(full_path.absolute()).lower()
+            
+    # Resolve the target name to any known matching executables
+    target_exes = set()
     
+    # 1. Check if target matches any registered app name (case-insensitive)
+    for reg_name, reg_conf in registered_apps.items():
+        if reg_name.lower() == name.lower():
+            unexport_names.add(reg_name)
+            p = get_norm_path(reg_conf.get("exe"), reg_conf)
+            if p:
+                target_exes.add(p)
+                
+    # 2. Check if target matches any auto-detected app name (case-insensitive)
+    for det_app in detected_apps:
+        if det_app.get("name", "").lower() == name.lower():
+            unexport_names.add(det_app["name"])
+            p = get_norm_path(det_app.get("exe"))
+            if p:
+                target_exes.add(p)
+                
+    # 3. For any target executables found, find all other apps that share them
+    if target_exes:
+        for reg_name, reg_conf in registered_apps.items():
+            p = get_norm_path(reg_conf.get("exe"), reg_conf)
+            if p in target_exes:
+                unexport_names.add(reg_name)
+        for det_app in detected_apps:
+            p = get_norm_path(det_app.get("exe"))
+            if p in target_exes:
+                unexport_names.add(det_app.get("name"))
+                
+    # Unexport each found name
+    for app_name in sorted(unexport_names):
+        safe_app_name = app_name.replace(" ", "_").lower()
+        desktop_file_path = desktop_dir / f"{safe_app_name}.desktop"
+        
+        if desktop_file_path.exists():
+            try:
+                desktop_file_path.unlink()
+                print_step("Unexported", f"Removed host desktop launcher: [bold]{desktop_file_path.name}[/bold]")
+            except Exception as e:
+                print_error(f"Failed to remove desktop file: {e}")
+                sys.exit(1)
+        else:
+            # If this was the explicitly requested app, print the warning
+            if app_name.lower() == name.lower():
+                print_warning(f"No exported desktop launcher found at {desktop_file_path}")
+                
     # Also clean up any URI handler files for this app
     import glob
     for handler in glob.glob(str(desktop_dir / f"cheapwine-uri-*")):
