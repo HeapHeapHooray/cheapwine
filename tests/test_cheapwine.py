@@ -574,6 +574,52 @@ class TestCheapwine(unittest.TestCase):
         self.assertFalse(lfx_in_env)
 
     @patch("subprocess.run")
+    def test_chocolatey_already_installed(self, mock_run):
+        """Test chocolatey command when choco.exe already exists in prefix."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.runner.invoke(cli, ["init"])
+
+        choco_exe = self.test_dir / ".cheapwine" / "drive_c" / "ProgramData" / "chocolatey" / "bin" / "choco.exe"
+        choco_exe.parent.mkdir(parents=True, exist_ok=True)
+        choco_exe.touch()
+
+        result = self.runner.invoke(cli, ["chocolatey", "list"])
+        self.assertEqual(result.exit_code, 0)
+
+    @patch("subprocess.run")
+    def test_chocolatey_install_and_run(self, mock_run):
+        """Test chocolatey command triggers install when choco.exe is missing."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.runner.invoke(cli, ["init"])
+
+        choco_exe_path = str(self.test_dir / ".cheapwine" / "drive_c" / "ProgramData" / "chocolatey" / "bin" / "choco.exe")
+
+        with patch("cheapwine.runners.ensure_chocolatey", return_value=choco_exe_path) as mock_ensure:
+            result = self.runner.invoke(cli, ["chocolatey", "install", "firefox"])
+            self.assertEqual(result.exit_code, 0)
+            mock_ensure.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_chocolatey_no_args_shows_help(self, mock_run):
+        """Test chocolatey with no args defaults to --help."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+
+        self.runner.invoke(cli, ["init"])
+
+        choco_exe = self.test_dir / ".cheapwine" / "drive_c" / "ProgramData" / "chocolatey" / "bin" / "choco.exe"
+        choco_exe.parent.mkdir(parents=True, exist_ok=True)
+        choco_exe.touch()
+
+        result = self.runner.invoke(cli, ["chocolatey"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("help", result.output.lower())
+
+    @patch("subprocess.run")
     def test_kron4ek_soda_runners(self, mock_run):
         """Test resolving and downloading Kron4ek and Soda runners."""
         from unittest.mock import patch, MagicMock

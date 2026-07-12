@@ -64,7 +64,7 @@ class Project:
             "apps": {}
         }
 
-    def init_project_files(self, wine_arch: str = "win64", win_version: str = "win10", runner: str = "wine", runner_version: str = None, latencyflex: bool = False) -> bool:
+    def init_project_files(self, wine_arch: str = "win64", win_version: str = "win10", runner: str = "wine", runner_version: str = None, winetricks: list = None, latencyflex: bool = False) -> bool:
         """Initializes distillery.json if not present."""
         if self.exists():
             return False
@@ -76,6 +76,8 @@ class Project:
         config["latencyflex"] = latencyflex
         if runner_version:
             config["runner_version"] = runner_version
+        if winetricks:
+            config["winetricks"] = winetricks
         self.save_config(config)
         return True
 

@@ -371,3 +371,78 @@ def ensure_winetricks() -> str:
     except Exception as e:
         print_error(f"Failed to download winetricks: {e}")
         sys.exit(1)
+
+
+def ensure_chocolatey(project) -> str:
+    """Ensures Chocolatey is installed inside the Wine prefix.
+    Returns the path to choco.exe inside the prefix.
+    """
+    import shutil
+    import subprocess
+    from cheapwine.wine import execute_command
+
+    prefix_path = project.prefix_path
+    choco_exe = prefix_path / "drive_c" / "ProgramData" / "chocolatey" / "bin" / "choco.exe"
+
+    if choco_exe.exists():
+        return str(choco_exe)
+
+    print_info("Chocolatey", "Chocolatey not found in prefix. Installing...")
+
+    url = "https://github.com/PietJankbal/Chocolatey-for-wine/releases/download/v0.5c.755/Chocolatey-for-wine.7z"
+    archive_path = download_file_with_progress(url, "Chocolatey-for-wine.7z")
+
+    extract_dir = RUNNERS_DIR / "chocolatey-installer"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    extracted = False
+    for cmd in ["7z", "7za"]:
+        sevenz_path = shutil.which(cmd)
+        if sevenz_path:
+            try:
+                subprocess.run(
+                    [sevenz_path, "x", str(archive_path), f"-o{extract_dir}", "-y"],
+                    check=True, capture_output=True
+                )
+                extracted = True
+                break
+            except subprocess.CalledProcessError:
+                continue
+
+    if not extracted:
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+        print_error(
+            "Failed to extract Chocolatey installer. "
+            "Please install 'p7zip' or 'p7zip-full' package, or 'py7zr' Python library."
+        )
+        sys.exit(1)
+
+    installer_exe = None
+    for f in extract_dir.rglob("*"):
+        if f.is_file() and f.suffix.lower() == ".exe" and "chocinstaller" in f.name.lower():
+            installer_exe = f
+            break
+
+    if not installer_exe:
+        shutil.rmtree(extract_dir)
+        print_error("Could not find Chocolatey installer executable in the archive.")
+        sys.exit(1)
+
+    print_info("Chocolatey", "Running Chocolatey installer inside Wine prefix (this may take a while)...")
+    exit_code = execute_command(project, [str(installer_exe), "/q"])
+
+    shutil.rmtree(extract_dir)
+
+    if exit_code != 0:
+        print_error(f"Chocolatey installer failed with exit code {exit_code}.")
+        sys.exit(1)
+
+    if not choco_exe.exists():
+        print_error("Chocolatey installation completed but choco.exe was not found.")
+        sys.exit(1)
+
+    print_step("Chocolatey", "Successfully installed in Wine prefix")
+    return str(choco_exe)

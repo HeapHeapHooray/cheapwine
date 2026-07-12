@@ -41,8 +41,9 @@ def cli(ctx: click.Context, version: bool):
 @click.option("--win-version", help="Windows version to configure (e.g. win95, winxp, win10).")
 @click.option("--runner", help="Global Wine runner to use (e.g. wine, proton, or absolute path).")
 @click.option("--runner-version", help="Global Wine runner version to use.")
+@click.option("--tricks", "-t", multiple=True, help="Global Winetricks components to apply (can specify multiple times).")
 @click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support.")
-def init(arch: str, force: bool, win_version: str, runner: str, runner_version: str, latencyflex: Optional[bool]):
+def init(arch: str, force: bool, win_version: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool]):
     """Initialize a new cheapwine project in the current directory."""
     project = Project.get_or_create_project()
     
@@ -53,7 +54,7 @@ def init(arch: str, force: bool, win_version: str, runner: str, runner_version: 
         target_win_ver = win_version if win_version else "win10"
         target_runner = runner if runner else "wine"
         target_lfx = latencyflex if latencyflex is not None else False
-        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner, runner_version=runner_version, latencyflex=target_lfx)
+        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner, runner_version=runner_version, winetricks=list(tricks) if tricks else None, latencyflex=target_lfx)
         print_step("Created", f"distillery.json default settings")
     else:
         config = project.load_config()
@@ -68,6 +69,9 @@ def init(arch: str, force: bool, win_version: str, runner: str, runner_version: 
             config_changed = True
         if runner_version and config.get("runner_version") != runner_version:
             config["runner_version"] = runner_version
+            config_changed = True
+        if tricks:
+            config["winetricks"] = list(tricks)
             config_changed = True
         if latencyflex is not None and config.get("latencyflex") != latencyflex:
             config["latencyflex"] = latencyflex
@@ -335,6 +339,30 @@ def winetricks(tricks_args: Tuple[str, ...]):
         print_info("Winetricks", f"Executing -> [bold]{' '.join(args_list)}[/bold]")
     exit_code = execute_command(project, args_list)
     sys.exit(exit_code)
+
+@cli.command(context_settings=dict(ignore_unknown_options=True))
+@click.argument("choco_args", nargs=-1, type=click.UNPROCESSED, metavar="[CHOCO_ARGS...]")
+def chocolatey(choco_args: Tuple[str, ...]):
+    """Run Chocolatey commands inside the local prefix context.
+
+    [CHOCO_ARGS...] are arguments passed directly to choco (e.g. 'install', 'list', 'search').
+
+    If Chocolatey is not already installed in the prefix, it will be
+    automatically downloaded and installed from Chocolatey-for-wine.
+    """
+    project = ensure_project()
+
+    from cheapwine.runners import ensure_chocolatey
+    choco_path = ensure_chocolatey(project)
+
+    args_list = [choco_path] + list(choco_args) if choco_args else [choco_path, "--help"]
+
+    if not choco_args:
+        print_info("Chocolatey", "No arguments provided. Showing help...")
+
+    exit_code = execute_command(project, args_list)
+    sys.exit(exit_code)
+
 
 @cli.command()
 def env():
