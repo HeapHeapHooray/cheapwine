@@ -19,6 +19,7 @@ A project-local Wine prefix and application manager (Wine's version of `uv`).
 * **Runner Auto-Downloads**: Automatically download Wine-GE, Proton-GE, Kron4ek, and Soda runners from GitHub by name (e.g. `wine-ge-8-26`, `kron4ek-9.0`).
 * **Custom Runner Versions**: Pin specific runner versions (e.g. `wine-ge-8-26`) globally or per application.
 * **Declarative Winetricks**: Define winetricks components (DLLs, codecs, fonts) in `distillery.json` — applied automatically on prefix init and cached to avoid re-application.
+* **Chocolatey Integration**: Install and manage Windows packages (like browsers, runtimes, or utilities) directly inside the prefix with automated installation of `Chocolatey-for-wine`.
 * **LatencyFleX Support**: Built-in LatencyFleX environment variable configuration for competitive gaming (NVIDIA Reflex-like latency reduction).
 * **Legacy 32-bit Support**: Create isolated 32-bit Wine prefixes (`win32`) on the fly, even for individual applications in a 64-bit project.
 * **Auto-Integration Spam Block**: Prevents Wine from cluttering your Linux host's desktop search menu during app installation by disabling `winemenubuilder` by default.
@@ -187,23 +188,67 @@ cheapwine init --latencyflex
 cheapwine add "CS2" "cs2.exe" --latencyflex
 ```
 
+### Chocolatey Package Manager Integration
+`cheapwine` supports installing and managing Windows applications and dependencies via Chocolatey directly inside your local prefix.
+
+When you run `cheapwine chocolatey` for the first time, it automatically downloads and installs `Chocolatey-for-wine` in the prefix.
+
+Examples:
+```bash
+# Install Firefox inside the prefix
+cheapwine chocolatey install firefox
+
+# Search for available packages
+cheapwine chocolatey search git
+
+# List installed packages
+cheapwine chocolatey list
+```
+
+### Desktop Export & Custom URI Schemes
+You can export any registered or auto-detected application to your host Linux desktop menu (generating a `.desktop` file and extracting its native `.exe` icon automatically). Additionally, you can register custom URI schemes (like `myapp://...`) so that clicking links in your browser launches the app inside the correct project prefix context.
+
+#### Exporting an App
+Export an application by name. This will extract its embedded icon using `pefile` and `Pillow`, place it in `~/.local/share/icons`, and generate a launcher file in `~/.local/share/applications`:
+```bash
+cheapwine export "SteamApp"
+```
+
+#### Registering Custom URI Schemes
+You can associate custom URI/protocol handlers with an application:
+```bash
+cheapwine export "SteamApp" --uri-scheme "steam" --uri-scheme "steamlink"
+```
+Or define them during registration:
+```bash
+cheapwine add "SteamApp" "steam.exe" --uri-scheme "steam"
+```
+Once registered and exported, any URIs starting with `steam://` clicked on your host system will launch the `SteamApp` executable inside this specific project's prefix and pass the URI payload directly to it.
+
+To remove host integration:
+```bash
+cheapwine unexport "SteamApp"
+```
+
 ---
 
 ## Command Reference
 
 | Command | Options | Description | Example |
 | :--- | :--- | :--- | :--- |
-| **`cheapwine init`** | `--arch [win32\|win64]`, `--win-version`, `--runner`, `--runner-version`, `--latencyflex/--no-latencyflex` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95 --latencyflex` |
+| **`cheapwine init`** | `--arch [win32\|win64]`, `--win-version`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--force` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95 --latencyflex` |
 | **`cheapwine run`** | `[app_or_exe]`, `[extra_args...]` | Runs a registered app or an executable path. Launches TUI if no app specified. | `cheapwine run mygame -dx11` |
 | **`cheapwine tui`** | *None* | Launches the interactive arrow-key select menu. | `cheapwine tui` |
-| **`cheapwine add`** | `--env`, `--workdir`, `--win-version`, `--arch`, `--runner`, `--runner-version`, `--tricks`, `--latencyflex/--no-latencyflex` | Registers an application. If EXE path omitted, resolves from auto-detected apps. | `cheapwine add steam` |
+| **`cheapwine add`** | `--env`/`-e`, `--workdir`/`-w`, `--win-version`, `--arch`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--uri-scheme` | Registers an application. If EXE path omitted, resolves from auto-detected apps. | `cheapwine add steam` |
 | **`cheapwine remove`**| `<name>` | Removes an application definition. | `cheapwine remove steam` |
 | **`cheapwine list`** | `--all` / `-a`, `--detected` / `-d` | Lists registered and/or auto-detected applications. | `cheapwine list --all` |
-| **`cheapwine export`**| `<name>` | Generates a desktop launcher in the host Linux applications menu. | `cheapwine export "RetroGame"` |
-| **`cheapwine unexport`**| `<name>` | Removes an exported desktop launcher from the host. | `cheapwine unexport "RetroGame"` |
+| **`cheapwine export`**| `<name>`, `--uri-scheme` | Generates a desktop launcher in the host Linux applications menu and registers URI protocols. | `cheapwine export "RetroGame" --uri-scheme myapp` |
+| **`cheapwine unexport`**| `<name>` | Removes an exported desktop launcher and associated URI handlers from the host. | `cheapwine unexport "RetroGame"` |
 | **`cheapwine wine`** | `[wine_args...]` | Runs a Wine utility in the prefix context. Defaults to `winecfg`. | `cheapwine wine regedit` |
 | **`cheapwine winetricks`**| `[tricks_args...]` | Runs `winetricks` inside the local prefix context. | `cheapwine winetricks corefonts` |
-| **`cheapwine env`** | *None* | Prints shell export commands to manually hook your terminal into the prefix. | `cheapwine env` |
+| **`cheapwine chocolatey`**| `[choco_args...]` | Runs Chocolatey commands inside the local prefix context (auto-installs if missing). | `cheapwine chocolatey install firefox` |
+| **`cheapwine env`** | *None* | Prints shell environment exports to manually hook your terminal into the prefix. | `cheapwine env` |
+| **`cheapwine uri`** | `<URL>` | Handles a URI from the host system via the exported application's protocol. | `cheapwine uri myapp://args` |
 | **`cheapwine easydistill`**| *None* | Launches the interactive TUI configuration editor for `distillery.json`. | `cheapwine easydistill` |
 
 ---
