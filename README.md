@@ -157,6 +157,7 @@ Specify a downloadable runner by name and version — cheapwine fetches it from 
 cheapwine init --runner "wine-ge" --runner-version "8-26"
 cheapwine init --runner "proton-ge" --runner-version "8-25"
 cheapwine init --runner "kron4ek" --runner-version "9.0"
+cheapwine init --runner "kron4ek-staging" --runner-version "11"
 cheapwine init --runner "soda" --runner-version "9.0-1"
 ```
 
