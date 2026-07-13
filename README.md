@@ -32,7 +32,13 @@ A project-local Wine prefix and application manager (Wine's version of `uv`).
 
 ## Installation
 
-To install `cheapwine` locally in editable mode (or from the repository root):
+To install `cheapwine` directly from PyPI using `pip`:
+
+```bash
+pip install cheapwine
+```
+
+Or, to install it locally in editable mode (for development) from the repository root:
 
 ```bash
 pip install -e .
