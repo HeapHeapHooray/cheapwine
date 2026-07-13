@@ -388,7 +388,7 @@ class TestCheapwine(unittest.TestCase):
              patch("cheapwine.runners.fetch_github_release", return_value=("GE-Proton8-25", "http://dummy", "GE-Proton8-25.tar.gz")), \
              patch("cheapwine.runners.download_file_with_progress", return_value=Path("/tmp/dummy.tar.gz")), \
              patch("cheapwine.runners.extract_archive", side_effect=mock_extract_impl) as mock_extract, \
-             patch("cheapwine.runners.find_wine_binary", side_effect=[dummy_wine, mocked_path]):
+             patch("cheapwine.runners.find_wine_binary", side_effect=[dummy_wine, dummy_wine, mocked_path]):
                  
             # Run resolver. It should detect dummy_wine is arm64 (incompatible), delete it, and download!
             resolve_and_download_runner("proton-ge-8-25")
@@ -434,6 +434,31 @@ class TestCheapwine(unittest.TestCase):
             self.assertEqual(tag, "11.11")
             self.assertEqual(url, "http://dummy/vanilla")
             self.assertEqual(asset_name, "wine-11.11-amd64-wow64.tar.xz")
+
+    def test_local_runner_prioritized_over_network(self):
+        """Test that resolve_and_download_runner returns locally installed runner without calling GitHub API."""
+        from cheapwine.runners import resolve_and_download_runner, RUNNERS_DIR
+        from unittest.mock import patch
+        
+        # 1. Create a dummy compatible local runner binary
+        dummy_dir = RUNNERS_DIR / "proton-ge-8-26"
+        dummy_bin_dir = dummy_dir / "files" / "bin"
+        dummy_bin_dir.mkdir(parents=True, exist_ok=True)
+        dummy_wine = dummy_bin_dir / "wine"
+        
+        # Write ELF x86_64 header: \x7fELF + 14 padding bytes + \x3e\x00 (machine 0x3e = x86_64)
+        elf_header = b"\x7fELF" + b"\x00"*14 + b"\x3e\x00"
+        dummy_wine.write_bytes(elf_header)
+        
+        # Patch fetch_github_release to raise an error to prove it was never called
+        with patch("platform.machine", return_value="x86_64"), \
+             patch("cheapwine.runners.fetch_github_release", side_effect=AssertionError("fetch_github_release should not be called")):
+            
+            result = resolve_and_download_runner("proton-ge-8-26")
+            self.assertEqual(result, str(dummy_wine.absolute()))
+            
+        # Clean up
+        shutil.rmtree(dummy_dir)
 
     @patch("subprocess.run")
     def test_winetricks_auto_download(self, mock_run):

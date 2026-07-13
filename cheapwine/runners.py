@@ -12,6 +12,34 @@ from cheapwine.utils import console, print_info, print_step, print_error, print_
 
 RUNNERS_DIR = Path("~/.local/share/cheapwine/runners").expanduser()
 
+def find_installed_runner_locally(type_prefix: str, version_part: str) -> Optional[Path]:
+    """Searches RUNNERS_DIR for an already-installed runner matching type_prefix and version_part."""
+    if not RUNNERS_DIR.exists():
+        return None
+        
+    normalized_ver = version_part.lower().replace("-", "").replace(".", "")
+    
+    try:
+        entries = sorted(list(RUNNERS_DIR.iterdir()), key=lambda x: x.name, reverse=True)
+    except Exception:
+        entries = list(RUNNERS_DIR.iterdir())
+        
+    for p in entries:
+        if p.is_dir():
+            name_lower = p.name.lower()
+            if name_lower.startswith(type_prefix.lower()):
+                if normalized_ver:
+                    ver_suffix = name_lower[len(type_prefix):].replace("-", "").replace(".", "")
+                    if normalized_ver in ver_suffix:
+                        wine_exe = find_wine_binary(p)
+                        if wine_exe and wine_exe.exists() and is_binary_compatible(wine_exe):
+                            return wine_exe
+                else:
+                    wine_exe = find_wine_binary(p)
+                    if wine_exe and wine_exe.exists() and is_binary_compatible(wine_exe):
+                        return wine_exe
+    return None
+
 def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     """
     Checks if runner_name refers to a downloadable runner (Proton-GE, Wine-GE, Kron4ek, or Soda).
@@ -57,6 +85,11 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     versions = re.findall(r"\d+(?:[-.]\d+)*", runner_lower)
     if versions:
         version_part = versions[0].replace(".", "-") # Normalize to dash-separated, e.g. 8-26
+        
+    # Check if we already have a compatible local runner matching this description to avoid hitting the GitHub API
+    local_wine = find_installed_runner_locally(type_prefix, version_part)
+    if local_wine:
+        return str(local_wine.absolute())
         
     # Fetch release from GitHub API
     tag_name, download_url, browser_download_name = fetch_github_release(repo, version_part, runner_name)
