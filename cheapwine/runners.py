@@ -43,19 +43,23 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     elif is_kron4ek:
         repo = "Kron4ek/Wine-Builds"
         type_prefix = "kron4ek"
+        if "staging" in runner_lower:
+            type_prefix += "-staging"
+        if "tkg" in runner_lower:
+            type_prefix += "-tkg"
     elif is_soda:
         repo = "bottlesdevs/wine"
         type_prefix = "soda"
         
     # Parse version. e.g. "wine-ge-8-26" -> tag "GE-Proton8-26"
     version_part = ""
-    # Look for digits separated by dot or dash, e.g. "8-25" or "9.0" or "9.0-1"
-    versions = re.findall(r"\d+(?:[-.]\d+)+", runner_lower)
+    # Look for digits separated by dot or dash, or just a standalone number sequence
+    versions = re.findall(r"\d+(?:[-.]\d+)*", runner_lower)
     if versions:
         version_part = versions[0].replace(".", "-") # Normalize to dash-separated, e.g. 8-26
         
     # Fetch release from GitHub API
-    tag_name, download_url, browser_download_name = fetch_github_release(repo, version_part)
+    tag_name, download_url, browser_download_name = fetch_github_release(repo, version_part, runner_name)
     if not download_url:
         print_error(f"Could not find a downloadable runner for '{runner_name}' on GitHub repository {repo}.")
         sys.exit(1)
@@ -131,8 +135,33 @@ def is_matching_arch(asset_name: str) -> bool:
         # Fallback: if host name is in asset name, or if no other arch is in asset name
         return host in asset_name_lower
 
-def fetch_github_release(repo: str, version_part: str = "") -> Tuple[str, str, str]:
+def fetch_github_release(repo: str, version_part: str = "", runner_name: str = "") -> Tuple[str, str, str]:
     """Queries GitHub API to find the matching tag and download asset URL."""
+    is_staging = "staging" in runner_name.lower()
+    is_tkg = "tkg" in runner_name.lower()
+
+    def get_best_asset(assets, tag_name):
+        candidates = []
+        for asset in assets:
+            name = asset.get("name", "")
+            if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
+                if is_matching_arch(name):
+                    name_lower = name.lower()
+                    score = 0
+                    if is_staging == ("staging" in name_lower):
+                        score += 10
+                    if is_tkg == ("tkg" in name_lower):
+                        score += 5
+                    if "wow64" in name_lower:
+                        score += 1
+                    candidates.append((score, asset, name))
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            best_asset = candidates[0][1]
+            best_name = candidates[0][2]
+            return tag_name, best_asset.get("browser_download_url"), best_name
+        return None
+
     if version_part:
         # Build candidate tags based on common conventions
         tags_to_try = []
@@ -168,11 +197,9 @@ def fetch_github_release(repo: str, version_part: str = "") -> Tuple[str, str, s
                 )
                 with urllib.request.urlopen(req) as response:
                     release = json.loads(response.read().decode())
-                for asset in release.get("assets", []):
-                    name = asset.get("name", "")
-                    if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
-                        if is_matching_arch(name):
-                            return release.get("tag_name", tag), asset.get("browser_download_url"), name
+                res = get_best_asset(release.get("assets", []), release.get("tag_name", tag))
+                if res:
+                    return res
             except Exception:
                 continue
 
@@ -208,11 +235,9 @@ def fetch_github_release(repo: str, version_part: str = "") -> Tuple[str, str, s
                     if normalized_ver not in normalized_tag:
                         continue
                         
-                for asset in release.get("assets", []):
-                    name = asset.get("name", "")
-                    if name.endswith(".tar.xz") or name.endswith(".tar.gz") or name.endswith(".tar.zst"):
-                        if is_matching_arch(name):
-                            return tag, asset.get("browser_download_url"), name
+                res = get_best_asset(release.get("assets", []), tag)
+                if res:
+                    return res
                             
             if not version_part:
                 break

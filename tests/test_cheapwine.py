@@ -399,6 +399,42 @@ class TestCheapwine(unittest.TestCase):
             # Verify mock_extract was called to extract the new download
             mock_extract.assert_called()
 
+    def test_kron4ek_staging_resolution(self):
+        """Test that Kron4ek staging is prioritized when staging is specified in the runner name, and vanilla is prioritized otherwise."""
+        from cheapwine.runners import fetch_github_release
+        from unittest.mock import patch, MagicMock
+        import io
+
+        mock_release_data = {
+            "tag_name": "11.11",
+            "assets": [
+                {"name": "wine-11.11-amd64-wow64.tar.xz", "browser_download_url": "http://dummy/vanilla"},
+                {"name": "wine-11.11-staging-amd64-wow64.tar.xz", "browser_download_url": "http://dummy/staging"}
+            ]
+        }
+        
+        # We need mock_urlopen to return mock_release_data when called
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(mock_release_data).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+        
+        # Test Case 1: staging requested
+        with patch("urllib.request.urlopen", return_value=mock_response), \
+             patch("platform.machine", return_value="x86_64"):
+            tag, url, asset_name = fetch_github_release("Kron4ek/Wine-Builds", "11.11", "kron4ek-11.11-staging")
+            self.assertEqual(tag, "11.11")
+            self.assertEqual(url, "http://dummy/staging")
+            self.assertEqual(asset_name, "wine-11.11-staging-amd64-wow64.tar.xz")
+            
+        # Test Case 2: vanilla requested (no staging in runner name)
+        mock_response.read.return_value = json.dumps(mock_release_data).encode("utf-8")
+        with patch("urllib.request.urlopen", return_value=mock_response), \
+             patch("platform.machine", return_value="x86_64"):
+            tag, url, asset_name = fetch_github_release("Kron4ek/Wine-Builds", "11.11", "kron4ek-11.11")
+            self.assertEqual(tag, "11.11")
+            self.assertEqual(url, "http://dummy/vanilla")
+            self.assertEqual(asset_name, "wine-11.11-amd64-wow64.tar.xz")
+
     @patch("subprocess.run")
     def test_winetricks_auto_download(self, mock_run):
         """Test that winetricks command always downloads a local copy and does not use system PATH."""
