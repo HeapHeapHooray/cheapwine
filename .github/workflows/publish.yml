@@ -54,6 +54,12 @@ jobs:
             updated = re.sub(r"(?m)^version\s*=\s*\"[^\"]+\"", f"version = \"{version}\"", content)
             with open("pyproject.toml", "w") as f:
                 f.write(updated)
+
+            with open("cheapwine/__init__.py", "r") as f:
+                content = f.read()
+            updated = re.sub(r"__version__\s*=\s*\"[^\"]+\"", f"__version__ = \"{version}\"", content)
+            with open("cheapwine/__init__.py", "w") as f:
+                f.write(updated)
             '
           else
             echo "Using default version from pyproject.toml"
