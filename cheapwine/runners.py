@@ -85,8 +85,32 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
         
     # Parse version. e.g. "wine-ge-8-26" -> tag "GE-Proton8-26"
     version_part = ""
+    # Strip known type prefixes so digits in runner names (e.g. "d2d1") aren't mistaken for versions
+    search_name = runner_lower
+    if is_d2d1:
+        for prefix in ["wine-d2d1", "d2d1", "mklnln", "dcomp"]:
+            if search_name.startswith(prefix):
+                search_name = search_name[len(prefix):]
+                break
+    elif is_wine_ge:
+        for prefix in ["wine-ge", "ge-wine"]:
+            if search_name.startswith(prefix):
+                search_name = search_name[len(prefix):]
+                break
+    elif is_proton_ge:
+        for prefix in ["proton-ge", "ge-proton"]:
+            if search_name.startswith(prefix):
+                search_name = search_name[len(prefix):]
+                break
+    elif is_kron4ek:
+        if search_name.startswith("kron4ek"):
+            search_name = search_name[len("kron4ek"):]
+    elif is_soda:
+        if search_name.startswith("soda"):
+            search_name = search_name[len("soda"):]
+    search_name = search_name.lstrip("-.")
     # Look for digits separated by dot or dash, or just a standalone number sequence
-    versions = re.findall(r"\d+(?:[-.]\d+)*", runner_lower)
+    versions = re.findall(r"\d+(?:[-.]\d+)*", search_name)
     if versions:
         version_part = versions[0].replace(".", "-") # Normalize to dash-separated, e.g. 8-26
         
