@@ -749,5 +749,54 @@ class TestCheapwine(unittest.TestCase):
             self.assertEqual(resolve_runner_name("kron4ek", "9.0"), "kron4ek-9.0")
             self.assertEqual(resolve_runner_name("soda", "9.0-1"), "soda-9.0-1")
 
+    @patch("subprocess.run")
+    def test_wine_d2d1_runner(self, mock_run):
+        """Test resolving and downloading wine-d2d1 runner from mklnln/wine-d2d1-dcomp."""
+        from unittest.mock import patch, MagicMock
+        mock_run.return_value = MagicMock(returncode=0)
+
+        mocked_d2d1_path = "/home/heap/.local/share/cheapwine/runners/wine-d2d1-11.0/wine-d2d1/bin/wine"
+
+        with patch("cheapwine.runners.resolve_and_download_runner") as mock_resolve:
+            mock_resolve.side_effect = lambda r: mocked_d2d1_path if any(k in r for k in ["wine-d2d1", "d2d1", "mklnln"]) else None
+
+            # 1. Test init with wine-d2d1 runner
+            result = self.runner.invoke(cli, ["init", "--runner", "wine-d2d1-11.0"])
+            self.assertEqual(result.exit_code, 0)
+            mock_resolve.assert_any_call("wine-d2d1-11.0")
+
+            # 2. Test init with mklnln repo name
+            result2 = self.runner.invoke(cli, ["init", "--runner", "mklnln/wine-d2d1-dcomp"])
+            self.assertEqual(result2.exit_code, 0)
+            mock_resolve.assert_any_call("mklnln/wine-d2d1-dcomp")
+
+            # 3. Test resolve_runner_name merges wine-d2d1 version
+            from cheapwine.wine import resolve_runner_name
+            self.assertEqual(resolve_runner_name("wine-d2d1", "11.0"), "wine-d2d1-11.0")
+            self.assertEqual(resolve_runner_name("d2d1", "11.0"), "d2d1-11.0")
+
+    def test_fetch_github_release_d2d1(self):
+        """Test fetching release asset for wine-d2d1-dcomp."""
+        from cheapwine.runners import fetch_github_release
+        from unittest.mock import patch, MagicMock
+
+        mock_release_data = {
+            "tag_name": "v11.0",
+            "assets": [
+                {"name": "wine-d2d1-11.0-x86_64.tar.zst", "browser_download_url": "http://dummy/wine-d2d1-11.0-x86_64.tar.zst"}
+            ]
+        }
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(mock_release_data).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+
+        with patch("urllib.request.urlopen", return_value=mock_response), \
+             patch("platform.machine", return_value="x86_64"):
+            tag, url, asset_name = fetch_github_release("mklnln/wine-d2d1-dcomp", "11.0", "wine-d2d1-11.0")
+            self.assertEqual(tag, "v11.0")
+            self.assertEqual(url, "http://dummy/wine-d2d1-11.0-x86_64.tar.zst")
+            self.assertEqual(asset_name, "wine-d2d1-11.0-x86_64.tar.zst")
+
 if __name__ == "__main__":
     unittest.main()

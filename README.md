@@ -15,8 +15,8 @@ A project-local Wine prefix and application manager (Wine's version of `uv`).
 
 * **Project-Local Prefixes**: Automatically sandboxes your Wine environments in `.cheapwine` inside your project directory.
 * **Declarative Distillery Settings (`distillery.json`)**: Declare architectures, Windows versions, environment variables, and application commands in a single, portable JSON file.
-* **Runner Overrides**: Use system Wine, Proton (via Steam), Wine-GE, Kron4ek, Soda, or custom-compiled Wine builds, both globally and overridden per application.
-* **Runner Auto-Downloads**: Automatically download Wine-GE, Proton-GE, Kron4ek, and Soda runners from GitHub by name (e.g. `wine-ge-8-26`, `kron4ek-9.0`).
+* **Runner Overrides**: Use system Wine, Proton (via Steam), Wine-GE, Kron4ek, Soda, Wine-D2D1, or custom-compiled Wine builds, both globally and overridden per application.
+* **Runner Auto-Downloads**: Automatically download Wine-GE, Proton-GE, Kron4ek, Soda, and Wine-D2D1 runners from GitHub by name (e.g. `wine-ge-8-26`, `kron4ek-9.0`, `wine-d2d1-11.0`).
 * **Custom Runner Versions**: Pin specific runner versions (e.g. `wine-ge-8-26`) globally or per application.
 * **Declarative Winetricks**: Define winetricks components (DLLs, codecs, fonts) in `distillery.json` — applied automatically on prefix init and cached to avoid re-application.
 * **Chocolatey Integration**: Install and manage Windows packages (like browsers, runtimes, or utilities) directly inside the prefix with automated installation of `Chocolatey-for-wine`.
@@ -165,6 +165,7 @@ cheapwine init --runner "proton-ge" --runner-version "8-25"
 cheapwine init --runner "kron4ek" --runner-version "9.0"
 cheapwine init --runner "kron4ek-staging" --runner-version "11"
 cheapwine init --runner "soda" --runner-version "9.0-1"
+cheapwine init --runner "wine-d2d1" --runner-version "11.0"
 ```
 
 ### Declarative Winetricks

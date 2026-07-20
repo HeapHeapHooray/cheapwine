@@ -239,7 +239,7 @@ def get_available_runners() -> List[str]:
             if item.is_dir():
                 runners.append(item.name)
                 
-    for r in ["proton-ge", "wine-ge", "kron4ek", "soda"]:
+    for r in ["proton-ge", "wine-ge", "kron4ek", "soda", "wine-d2d1"]:
         if r not in runners:
             runners.append(r)
             

@@ -33,7 +33,7 @@ def resolve_runner_name(runner: str, version: Optional[str] = None) -> str:
         return runner
         
     # Only combine if it matches standard downloadable runner templates
-    if any(tmpl in runner_lower for tmpl in ["proton-ge", "wine-ge", "ge-proton", "ge-wine", "kron4ek", "soda"]):
+    if any(tmpl in runner_lower for tmpl in ["proton-ge", "wine-ge", "ge-proton", "ge-wine", "kron4ek", "soda", "wine-d2d1", "d2d1", "mklnln"]):
         return f"{runner}-{version}"
         
     return runner

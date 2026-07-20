@@ -57,8 +57,9 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     is_proton_ge = "proton-ge" in runner_lower or runner_lower.startswith("ge-proton")
     is_kron4ek = "kron4ek" in runner_lower
     is_soda = "soda" in runner_lower
+    is_d2d1 = any(k in runner_lower for k in ["wine-d2d1", "d2d1", "dcomp", "mklnln"])
     
-    if not (is_wine_ge or is_proton_ge or is_kron4ek or is_soda):
+    if not (is_wine_ge or is_proton_ge or is_kron4ek or is_soda or is_d2d1):
         return None
         
     # Determine the repo and release tag/prefix
@@ -78,6 +79,9 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
     elif is_soda:
         repo = "bottlesdevs/wine"
         type_prefix = "soda"
+    elif is_d2d1:
+        repo = "mklnln/wine-d2d1-dcomp"
+        type_prefix = "wine-d2d1"
         
     # Parse version. e.g. "wine-ge-8-26" -> tag "GE-Proton8-26"
     version_part = ""
@@ -99,6 +103,8 @@ def resolve_and_download_runner(runner_name: str) -> Optional[str]:
         
     # Target directory name (e.g. ~/.local/share/cheapwine/runners/wine-ge-8-26)
     clean_tag = tag_name.replace("GE-Proton", "").lower()
+    if clean_tag.startswith("v") and len(clean_tag) > 1 and clean_tag[1].isdigit():
+        clean_tag = clean_tag[1:]
     if clean_tag.startswith(f"{type_prefix}-"):
         clean_tag = clean_tag[len(type_prefix)+1:]
     elif clean_tag.startswith(type_prefix):
@@ -220,6 +226,13 @@ def fetch_github_release(repo: str, version_part: str = "", runner_name: str = "
             for iter_val in ["1", "2", "3", "0", "4", "5", "6", "7", "8", "9"]:
                 tags_to_try.append(f"soda-{version_dot}-{iter_val}")
                 tags_to_try.append(f"soda-{version_part}-{iter_val}")
+        elif "d2d1" in repo.lower() or "mklnln" in repo.lower(): # wine-d2d1-dcomp
+            tags_to_try.append(f"v{version_dot}")
+            tags_to_try.append(f"v{version_part}")
+            tags_to_try.append(version_dot)
+            tags_to_try.append(version_part)
+            tags_to_try.append(f"wine-d2d1-{version_dot}")
+            tags_to_try.append(f"wine-d2d1-{version_part}")
             
         for tag in tags_to_try:
             tag_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
@@ -326,15 +339,45 @@ def download_file_with_progress(url: str, filename: str) -> Path:
 def extract_archive(archive_path: Path, target_dir: Path):
     """Extracts tarball to target directory."""
     target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        with tarfile.open(archive_path) as tar:
-            tar.extractall(path=target_dir)
-    except Exception as e:
-        print_error(f"Extraction failed: {e}")
+    archive_name = archive_path.name.lower()
+    is_zst = archive_name.endswith(".tar.zst") or archive_name.endswith(".zst")
+
+    extracted = False
+    if is_zst:
         import shutil
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        sys.exit(1)
+        import subprocess
+        if shutil.which("tar"):
+            try:
+                subprocess.run(
+                    ["tar", "--zstd", "-xf", str(archive_path), "-C", str(target_dir)],
+                    check=True, capture_output=True
+                )
+                extracted = True
+            except Exception:
+                pass
+
+        if not extracted and shutil.which("zstd") and shutil.which("tar"):
+            try:
+                p1 = subprocess.Popen(["zstd", "-dc", str(archive_path)], stdout=subprocess.PIPE)
+                p2 = subprocess.Popen(["tar", "-xf", "-", "-C", str(target_dir)], stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if p1.stdout:
+                    p1.stdout.close()
+                p2.communicate()
+                if p2.returncode == 0:
+                    extracted = True
+            except Exception:
+                pass
+
+    if not extracted:
+        try:
+            with tarfile.open(archive_path) as tar:
+                tar.extractall(path=target_dir)
+        except Exception as e:
+            print_error(f"Extraction failed: {e}")
+            import shutil
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            sys.exit(1)
 
 def find_wine_binary(runner_dir: Path) -> Optional[Path]:
     """Recursively searches for the wine executable inside runner_dir."""
