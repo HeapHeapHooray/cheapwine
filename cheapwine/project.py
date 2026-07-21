@@ -64,20 +64,39 @@ class Project:
             "apps": {}
         }
 
-    def init_project_files(self, wine_arch: str = "win64", win_version: str = "win10", runner: str = "wine", runner_version: str = None, winetricks: list = None, latencyflex: bool = False) -> bool:
+    def init_project_files(
+        self,
+        wine_arch: str = "win64",
+        win_version: str = "win10",
+        runner: str = "wine",
+        runner_version: Optional[str] = None,
+        winetricks: Optional[list] = None,
+        latencyflex: bool = False,
+        name: Optional[str] = None,
+        wine_version: Optional[str] = None,
+        env: Optional[dict] = None
+    ) -> bool:
         """Initializes distillery.json if not present."""
         if self.exists():
             return False
         
         config = self.get_default_config()
+        if name:
+            config["name"] = name
         config["wine_arch"] = wine_arch
         config["win_version"] = win_version
+        if wine_version:
+            config["wine_version"] = wine_version
         config["runner"] = runner
         config["latencyflex"] = latencyflex
         if runner_version:
             config["runner_version"] = runner_version
         if winetricks:
             config["winetricks"] = winetricks
+        if env:
+            if "env" not in config:
+                config["env"] = {}
+            config["env"].update(env)
         self.save_config(config)
         return True
 

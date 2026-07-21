@@ -68,6 +68,50 @@ class TestCheapwine(unittest.TestCase):
         self.assertEqual(remove_result.exit_code, 0)
         self.assertIsNone(project.get_app("mygame"))
 
+    def test_init_env_configuration(self):
+        """Test cheapwine init with --env / -e options to set and update project environment variables."""
+        # 1. Initialize project with environment variables
+        result = self.runner.invoke(cli, ["init", "--env", "FOO=bar", "-e", "BAZ=qux"])
+        self.assertEqual(result.exit_code, 0)
+        
+        config_path = self.test_dir / "distillery.json"
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["env"].get("FOO"), "bar")
+        self.assertEqual(data["env"].get("BAZ"), "qux")
+        self.assertEqual(data["env"].get("WINEDEBUG"), "-all")
+        
+        # 2. Update existing project env with cheapwine init
+        result_update = self.runner.invoke(cli, ["init", "-e", "FOO=updated", "-e", "NEWKEY=newval"])
+        self.assertEqual(result_update.exit_code, 0)
+        
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["env"].get("FOO"), "updated")
+        self.assertEqual(data["env"].get("BAZ"), "qux")
+        self.assertEqual(data["env"].get("NEWKEY"), "newval")
+
+    def test_init_name_and_wine_version(self):
+        """Test cheapwine init with --name / -n and --wine-version options."""
+        # 1. Initialize project with name and wine-version
+        result = self.runner.invoke(cli, ["init", "--name", "my-custom-project", "--wine-version", "9.0"])
+        self.assertEqual(result.exit_code, 0)
+        
+        config_path = self.test_dir / "distillery.json"
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["name"], "my-custom-project")
+        self.assertEqual(data["wine_version"], "9.0")
+        
+        # 2. Update existing project name and wine-version
+        result_update = self.runner.invoke(cli, ["init", "-n", "updated-project", "--wine-version", "9.1"])
+        self.assertEqual(result_update.exit_code, 0)
+        
+        with open(config_path, "r") as f:
+            data = json.load(f)
+        self.assertEqual(data["name"], "updated-project")
+        self.assertEqual(data["wine_version"], "9.1")
+
     def test_win_version_configuration(self):
         """Test initializing with custom win_version and updating it."""
         # 1. Init with custom version

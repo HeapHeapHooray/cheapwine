@@ -36,30 +36,57 @@ def cli(ctx: click.Context, version: bool):
         click.echo(ctx.get_help())
 
 @cli.command()
+@click.option("--name", "-n", help="Name of the project (defaults to directory name).")
 @click.option("--arch", type=click.Choice(["win32", "win64"]), default="win64", help="Architecture for the Wine prefix.")
 @click.option("--force", is_flag=True, help="Force re-initialization of prefix if it exists.")
 @click.option("--win-version", help="Windows version to configure (e.g. win95, winxp, win10).")
+@click.option("--wine-version", help="Wine version setting (e.g. system, 8.0, 9.0).")
 @click.option("--runner", help="Global Wine runner to use (e.g. wine, proton, or absolute path).")
 @click.option("--runner-version", help="Global Wine runner version to use.")
 @click.option("--tricks", "-t", multiple=True, help="Global Winetricks components to apply (can specify multiple times).")
 @click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support.")
-def init(arch: str, force: bool, win_version: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool]):
+@click.option("--env", "-e", multiple=True, help="Environment variables in KEY=VALUE format (can specify multiple times).")
+def init(name: Optional[str], arch: str, force: bool, win_version: str, wine_version: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], env: Tuple[str, ...]):
     """Initialize a new cheapwine project in the current directory."""
     project = Project.get_or_create_project()
     
     config_created = False
     config_changed = False
     
+    env_dict = {}
+    for item in env:
+        if "=" in item:
+            k, v = item.split("=", 1)
+            env_dict[k.strip()] = v.strip()
+        else:
+            print_warning(f"Invalid env format '{item}'. Expected KEY=VALUE. Skipping.")
+    
     if not project.exists():
         target_win_ver = win_version if win_version else "win10"
         target_runner = runner if runner else "wine"
         target_lfx = latencyflex if latencyflex is not None else False
-        config_created = project.init_project_files(wine_arch=arch, win_version=target_win_ver, runner=target_runner, runner_version=runner_version, winetricks=list(tricks) if tricks else None, latencyflex=target_lfx)
+        config_created = project.init_project_files(
+            name=name,
+            wine_arch=arch,
+            win_version=target_win_ver,
+            wine_version=wine_version,
+            runner=target_runner,
+            runner_version=runner_version,
+            winetricks=list(tricks) if tricks else None,
+            latencyflex=target_lfx,
+            env=env_dict if env_dict else None
+        )
         print_step("Created", f"distillery.json default settings")
     else:
         config = project.load_config()
+        if name and config.get("name") != name:
+            config["name"] = name
+            config_changed = True
         if win_version and config.get("win_version") != win_version:
             config["win_version"] = win_version
+            config_changed = True
+        if wine_version and config.get("wine_version") != wine_version:
+            config["wine_version"] = wine_version
             config_changed = True
         if arch and config.get("wine_arch") != arch:
             config["wine_arch"] = arch
@@ -76,6 +103,13 @@ def init(arch: str, force: bool, win_version: str, runner: str, runner_version: 
         if latencyflex is not None and config.get("latencyflex") != latencyflex:
             config["latencyflex"] = latencyflex
             config_changed = True
+        if env_dict:
+            if "env" not in config:
+                config["env"] = {}
+            for k, v in env_dict.items():
+                if config["env"].get(k) != v:
+                    config["env"][k] = v
+                    config_changed = True
             
         if config_changed:
             project.save_config(config)

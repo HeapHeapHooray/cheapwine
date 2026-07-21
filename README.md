@@ -250,7 +250,7 @@ cheapwine unexport "SteamApp"
 
 | Command | Options | Description | Example |
 | :--- | :--- | :--- | :--- |
-| **`cheapwine init`** | `--arch [win32\|win64]`, `--win-version`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--force` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95 --latencyflex` |
+| **`cheapwine init`** | `--name`/`-n`, `--arch [win32\|win64]`, `--win-version`, `--wine-version`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--env`/`-e`, `--force` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95 -e MYVAR=1` |
 | **`cheapwine run`** | `[app_or_exe]`, `[extra_args...]` | Runs a registered app or an executable path. Launches TUI if no app specified. | `cheapwine run mygame -dx11` |
 | **`cheapwine tui`** | *None* | Launches the interactive arrow-key select menu. | `cheapwine tui` |
 | **`cheapwine add`** | `--env`/`-e`, `--workdir`/`-w`, `--win-version`, `--arch`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--uri-scheme` | Registers an application. If EXE path omitted, resolves from auto-detected apps. | `cheapwine add steam` |
