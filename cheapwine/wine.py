@@ -60,6 +60,9 @@ def get_wine_env(project: Project, app_env: Optional[Dict[str, str]] = None, win
     runner_parts = shlex.split(runner)
     if runner_parts:
         env["WINE"] = runner_parts[0]
+        if os.path.isabs(runner_parts[0]):
+            runner_bin_dir = str(Path(runner_parts[0]).parent)
+            env["PATH"] = runner_bin_dir + os.pathpsep + env.get("PATH", "")
     
     # Apply project-level Wine env settings
     project_env = config.get("env", {})

@@ -405,15 +405,20 @@ def extract_archive(archive_path: Path, target_dir: Path):
 
 def find_wine_binary(runner_dir: Path) -> Optional[Path]:
     """Recursively searches for the wine executable inside runner_dir."""
-    candidates = list(runner_dir.glob("**/bin/wine"))
-    if not candidates:
-        candidates = list(runner_dir.glob("**/bin/wine64"))
+    candidates_wine = list(runner_dir.glob("**/bin/wine"))
+    valid_wine = [c for c in candidates_wine if os.access(c, os.X_OK) and is_binary_compatible(c)]
+    if valid_wine:
+        return valid_wine[0]
         
-    if candidates:
-        for c in candidates:
-            if os.access(c, os.X_OK):
-                return c
-        return candidates[0]
+    candidates_wine64 = list(runner_dir.glob("**/bin/wine64"))
+    valid_wine64 = [c for c in candidates_wine64 if os.access(c, os.X_OK) and is_binary_compatible(c)]
+    if valid_wine64:
+        return valid_wine64[0]
+        
+    if candidates_wine:
+        return candidates_wine[0]
+    if candidates_wine64:
+        return candidates_wine64[0]
         
     return None
 
@@ -459,8 +464,15 @@ def is_binary_compatible(path: Path) -> bool:
         return True
         
     if host_norm == "x86_64":
+        if binary_arch == "32bit":
+            # 32-bit ELF binaries require 32-bit dynamic loader / multilib
+            if not os.path.exists("/lib/ld-linux.so.2") and not os.path.exists("/lib32/ld-linux.so.2"):
+                return False
         return binary_arch in ["x86_64", "32bit"] # 32-bit can run on 64-bit host
     elif host_norm == "arm64":
+        if binary_arch == "32bit":
+            if not os.path.exists("/lib/ld-linux-armhf.so.3"):
+                return False
         return binary_arch in ["arm64", "32bit"] # ARM 32-bit/64-bit
         
     return True
