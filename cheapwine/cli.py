@@ -227,7 +227,8 @@ def run(app_or_exe: Optional[str], extra_args: Tuple[str, ...]):
 @click.option("--tricks", "-t", multiple=True, help="App-specific Winetricks components (can specify multiple times).")
 @click.option("--latencyflex/--no-latencyflex", default=None, help="Enable or disable LatencyFleX support for this application.")
 @click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register for this app (e.g. myapp). Can specify multiple times.")
-def add(name: Optional[str], exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], uri_scheme: Tuple[str, ...]):
+@click.option("--icon", "-i", help="Path to custom icon image, executable, or icon name.")
+def add(name: Optional[str], exe: Optional[str], args: Tuple[str, ...], env: Tuple[str, ...], workdir: str, win_version: str, arch: str, runner: str, runner_version: str, tricks: Tuple[str, ...], latencyflex: Optional[bool], uri_scheme: Tuple[str, ...], icon: Optional[str] = None):
     """Add a new application to distillery.json.
 
     [NAME] is the unique registry name for the application. If omitted,
@@ -317,7 +318,8 @@ def add(name: Optional[str], exe: Optional[str], args: Tuple[str, ...], env: Tup
         runner_version=runner_version,
         winetricks=list(tricks),
         latencyflex=latencyflex,
-        uri_schemes=list(uri_scheme) if uri_scheme else None
+        uri_schemes=list(uri_scheme) if uri_scheme else None,
+        icon=icon
     )
     scheme_hint = f" --uri-scheme {' --uri-scheme '.join(uri_scheme)}" if uri_scheme else ""
     if uri_scheme:
@@ -566,6 +568,122 @@ def extract_exe_icon(exe_path: Path, icon_name: str) -> bool:
             pass
 
 
+def process_custom_icon(icon_input: Union[str, Path], icon_name: str, project_root: Optional[Path] = None) -> Tuple[bool, str]:
+    """Process a custom icon (image file, ICO, SVG, EXE, or icon theme name) and install it for host desktop."""
+    if not icon_input:
+        return False, "wine"
+
+    icon_str = str(icon_input).strip()
+    p = Path(icon_str).expanduser()
+
+    # Try resolving relative path against project root if not found relative to current working directory
+    if not p.is_absolute() and project_root and not p.exists():
+        alt_p = (project_root / p).resolve()
+        if alt_p.exists():
+            p = alt_p
+
+    if p.exists() and p.is_file():
+        icons_dir = Path("~/.local/share/icons").expanduser()
+
+        # 1. Executable or DLL file
+        if p.suffix.lower() in [".exe", ".dll"]:
+            if extract_exe_icon(p, icon_name):
+                return True, icon_name
+            return False, "wine"
+
+        # 2. SVG vector file
+        if p.suffix.lower() in [".svg", ".svgz"]:
+            try:
+                target = icons_dir / "hicolor" / "scalable" / "apps" / f"{icon_name}.svg"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                import shutil
+                shutil.copy2(p, target)
+                print_info("Icon", f"Installed SVG icon to {target}")
+                return True, icon_name
+            except Exception as e:
+                print_warning(f"Failed to copy SVG icon {p}: {e}")
+                return False, "wine"
+
+        # 3. Image file (PNG, JPG, JPEG, WEBP, BMP, ICO, GIF, TIFF, etc.)
+        try:
+            from PIL import Image
+        except ImportError as e:
+            print_warning(f"Icon processing requires Pillow: {e}")
+            return False, "wine"
+
+        try:
+            img = Image.open(p)
+            n_frames = getattr(img, "n_frames", 1)
+            saved = 0
+
+            # Determine resampling filter
+            if hasattr(Image, "Resampling"):
+                resample_filter = Image.Resampling.LANCZOS
+            else:
+                resample_filter = getattr(Image, "LANCZOS", getattr(Image, "ANTIALIAS", Image.BICUBIC))
+
+            if n_frames > 1 and p.suffix.lower() in [".ico", ".gif", ".tiff"]:
+                for i in range(n_frames):
+                    try:
+                        img.seek(i)
+                        frame = img.copy()
+                        if frame.mode != "RGBA":
+                            frame = frame.convert("RGBA")
+                        w, h = frame.size
+                        if w > 0 and h > 0:
+                            target = icons_dir / "hicolor" / f"{w}x{h}" / "apps" / f"{icon_name}.png"
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            frame.save(target, "PNG")
+                            saved += 1
+                    except Exception:
+                        continue
+            else:
+                if img.mode != "RGBA":
+                    img_rgba = img.convert("RGBA")
+                else:
+                    img_rgba = img.copy()
+
+                w, h = img_rgba.size
+                # If non-square, pad to square RGBA canvas so it doesn't get distorted
+                if w != h:
+                    max_dim = max(w, h)
+                    square_img = Image.new("RGBA", (max_dim, max_dim), (0, 0, 0, 0))
+                    offset = ((max_dim - w) // 2, (max_dim - h) // 2)
+                    square_img.paste(img_rgba, offset, mask=img_rgba)
+                else:
+                    square_img = img_rgba
+
+                orig_w, orig_h = square_img.size
+                target = icons_dir / "hicolor" / f"{orig_w}x{orig_h}" / "apps" / f"{icon_name}.png"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                square_img.save(target, "PNG")
+                saved += 1
+
+                standard_sizes = [16, 24, 32, 48, 64, 128, 256, 512]
+                for size in standard_sizes:
+                    if size != orig_w and size <= max(orig_w, 512):
+                        resized = square_img.resize((size, size), resample_filter)
+                        t = icons_dir / "hicolor" / f"{size}x{size}" / "apps" / f"{icon_name}.png"
+                        t.parent.mkdir(parents=True, exist_ok=True)
+                        resized.save(t, "PNG")
+                        saved += 1
+
+            if saved:
+                print_info("Icon", f"Installed custom icon ({saved} sizes) to {icons_dir / 'hicolor'}")
+                return True, icon_name
+        except Exception as e:
+            print_warning(f"Could not process custom icon image {p}: {e}")
+            return False, "wine"
+
+    # If icon_str looks like a path or extension but file doesn't exist
+    if "/" in icon_str or "\\" in icon_str or any(icon_str.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".ico", ".svg", ".webp", ".bmp"]):
+        print_warning(f"Specified icon file not found: {icon_str}")
+        return False, "wine"
+
+    # Assume it's a theme icon name (e.g. "wine", "steam", "firefox")
+    return True, icon_str
+
+
 def find_app_uri_schemes(prefix_path: Path, exe_name: str) -> List[str]:
     """Scan Wine registry for URI schemes registered by the given executable."""
     schemes = []
@@ -703,12 +821,19 @@ def _sync_app_desktop(project: Project, app_name: str, icon_name: Optional[str] 
     desktop_file_path = desktop_dir / f"{safe_app_name}.desktop"
 
     if icon_name is None:
-        icon_name = "wine"
-        if desktop_file_path.exists():
-            for line in desktop_file_path.read_text(encoding="utf-8").splitlines():
-                if line.startswith("Icon="):
-                    icon_name = line.split("=", 1)[1].strip()
-                    break
+        if app_info.get("icon"):
+            ok, res_icon = process_custom_icon(app_info["icon"], f"cheapwine-{safe_app_name}", project.root_dir)
+            if ok:
+                icon_name = res_icon
+            else:
+                icon_name = "wine"
+        else:
+            icon_name = "wine"
+            if desktop_file_path.exists():
+                for line in desktop_file_path.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("Icon="):
+                        icon_name = line.split("=", 1)[1].strip()
+                        break
 
     app_schemes = app_info.get("uri_schemes", [])
     mime_line = "MimeType=" + "".join(f"x-scheme-handler/{s};" for s in app_schemes) if app_schemes else ""
@@ -749,7 +874,8 @@ Categories=Wine;
 @cli.command()
 @click.argument("name", metavar="<NAME>")
 @click.option("--uri-scheme", multiple=True, help="URI scheme(s) to register (e.g. myapp). Can specify multiple times.")
-def export(name: str, uri_scheme: Tuple[str, ...]):
+@click.option("--icon", "-i", help="Path to custom icon image, executable, or icon name.")
+def export(name: str, uri_scheme: Tuple[str, ...], icon: Optional[str] = None):
     """Export an application to the host Linux desktop menu.
 
     <NAME> is the registry name of the application to export.
@@ -776,10 +902,12 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
         print_error(f"Application [accent]{name}[/accent] not found in registered or auto-detected apps.")
         sys.exit(1)
     
-    # If app was auto-detected (not registered), register it now so we can persist URI schemes
+    # If app was auto-detected (not registered), register it now so we can persist URI schemes and icon
     if app_config is None:
         print_info("Register", f"Auto-registering [accent]{name}[/accent] in distillery.json")
-        app_config = project.add_app(app_name=name, exe_path=exe_path, uri_schemes=list(uri_scheme) if uri_scheme else None)
+        app_config = project.add_app(app_name=name, exe_path=exe_path, uri_schemes=list(uri_scheme) if uri_scheme else None, icon=icon)
+    elif icon:
+        app_config["icon"] = icon
     
     # 2. Resolve the cheapwine binary path for the desktop launcher
     import shutil
@@ -787,11 +915,22 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
     
     safe_proj_name = project.root_dir.name.replace(" ", "_").lower()
     safe_app_name = name.replace(" ", "_").lower()
+    icon_name = f"cheapwine-{safe_app_name}"
     
-    # 3. Extract application icon from the exe
+    # 3. Determine application icon
+    icon_to_use = icon or (app_config.get("icon") if app_config else None)
+    icon_resolved = False
+    final_icon_name = "wine"
+
+    if icon_to_use:
+        success, res_icon = process_custom_icon(icon_to_use, icon_name, project.root_dir)
+        if success:
+            final_icon_name = res_icon
+            icon_resolved = True
+
     wine_arch = app_config.get("wine_arch") if app_config else None
     prefix = get_wine_prefix_path(project, wine_arch)
-    
+
     # Resolve the exe path within the Wine prefix
     full_exe_path = None
     if "C:\\" in exe_path or "c:\\" in exe_path:
@@ -805,13 +944,17 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
     else:
         # Bare filename like "notepad.exe" — search the prefix
         full_exe_path = prefix / "drive_c" / "windows" / exe_path
-    
-    print_info("Icon", f"Looking for exe at: {full_exe_path}")
-    
-    icon_name = f"cheapwine-{safe_app_name}"
-    icon_extracted = extract_exe_icon(full_exe_path, icon_name) if full_exe_path and full_exe_path.exists() else False
-    if not icon_extracted:
-        print_info("Icon", "Falling back to default wine icon")
+
+    if not icon_resolved:
+        if full_exe_path and full_exe_path.exists():
+            print_info("Icon", f"Looking for exe at: {full_exe_path}")
+            if extract_exe_icon(full_exe_path, icon_name):
+                final_icon_name = icon_name
+                icon_resolved = True
+        
+        if not icon_resolved:
+            print_info("Icon", "Falling back to default wine icon")
+            final_icon_name = "wine"
     
     # 4. Detect URI schemes registered by the application in the Wine prefix
     exe_name = Path(exe_path.replace("C:\\", "").replace("\\", "/") if "C:\\" in exe_path else exe_path).name
@@ -837,16 +980,19 @@ def export(name: str, uri_scheme: Tuple[str, ...]):
             app_schemes = [inferred]
             print_info("Inferred", f"URI scheme [accent]{inferred}[/accent] from executable's parent directory")
     
-    # Persist uri_schemes back to distillery.json so `cheapwine uri` can find them
-    if app_schemes and app_config is not None:
-        app_config["uri_schemes"] = app_schemes
+    # Persist config back to distillery.json
+    if app_config is not None:
+        if icon:
+            app_config["icon"] = icon
+        if app_schemes:
+            app_config["uri_schemes"] = app_schemes
         config = project.load_config()
         config["apps"][name] = app_config
         project.save_config(config)
     
     # 5. Sync the .desktop file and register URI schemes with the system
     try:
-        _sync_app_desktop(project, name, icon_name=(icon_name if icon_extracted else "wine"))
+        _sync_app_desktop(project, name, icon_name=final_icon_name)
         if app_schemes:
             schemes_str = ", ".join(app_schemes)
             print_step("Exported", f"App [accent]{name}[/accent] to host desktop launcher + URI schemes: {schemes_str}")

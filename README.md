@@ -223,19 +223,24 @@ cheapwine chocolatey list
 You can export any registered or auto-detected application to your host Linux desktop menu (generating a `.desktop` file and extracting its native `.exe` icon automatically). Additionally, you can register custom URI schemes (like `myapp://...`) so that clicking links in your browser launches the app inside the correct project prefix context.
 
 #### Exporting an App
-Export an application by name. This will extract its embedded icon using `pefile` and `Pillow`, place it in `~/.local/share/icons`, and generate a launcher file in `~/.local/share/applications`:
+Export an application by name. By default, this will extract its embedded icon from `.exe` using `pefile` and `Pillow`, place it in `~/.local/share/icons`, and generate a launcher file in `~/.local/share/applications`:
 ```bash
 cheapwine export "SteamApp"
 ```
 
-#### Registering Custom URI Schemes
-You can associate custom URI/protocol handlers with an application:
+You can also specify a custom icon (any image format like PNG, JPG, SVG, ICO, WEBP, or an icon theme name):
 ```bash
-cheapwine export "SteamApp" --uri-scheme "steam" --uri-scheme "steamlink"
+cheapwine export "SteamApp" --icon assets/app_logo.png
+```
+
+#### Registering Custom URI Schemes & Icons
+You can associate custom URI/protocol handlers and icons with an application:
+```bash
+cheapwine export "SteamApp" --uri-scheme "steam" --uri-scheme "steamlink" --icon assets/app_logo.png
 ```
 Or define them during registration:
 ```bash
-cheapwine add "SteamApp" "steam.exe" --uri-scheme "steam"
+cheapwine add "SteamApp" "steam.exe" --uri-scheme "steam" --icon assets/app_logo.png
 ```
 Once registered and exported, any URIs starting with `steam://` clicked on your host system will launch the `SteamApp` executable inside this specific project's prefix and pass the URI payload directly to it.
 
@@ -253,10 +258,10 @@ cheapwine unexport "SteamApp"
 | **`cheapwine init`** | `--name`/`-n`, `--arch [win32\|win64]`, `--win-version`, `--wine-version`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--env`/`-e`, `--force` | Creates `distillery.json` and initializes the Wine prefix. | `cheapwine init --arch win32 --win-version win95 -e MYVAR=1` |
 | **`cheapwine run`** | `[app_or_exe]`, `[extra_args...]` | Runs a registered app or an executable path. Launches TUI if no app specified. | `cheapwine run mygame -dx11` |
 | **`cheapwine tui`** | *None* | Launches the interactive arrow-key select menu. | `cheapwine tui` |
-| **`cheapwine add`** | `--env`/`-e`, `--workdir`/`-w`, `--win-version`, `--arch`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--uri-scheme` | Registers an application. If EXE path omitted, resolves from auto-detected apps. | `cheapwine add steam` |
+| **`cheapwine add`** | `--env`/`-e`, `--workdir`/`-w`, `--win-version`, `--arch`, `--runner`, `--runner-version`, `--tricks`/`-t`, `--latencyflex/--no-latencyflex`, `--uri-scheme`, `--icon`/`-i` | Registers an application. If EXE path omitted, resolves from auto-detected apps. | `cheapwine add steam --icon assets/steam.png` |
 | **`cheapwine remove`**| `<name>` | Removes an application definition. | `cheapwine remove steam` |
 | **`cheapwine list`** | `--all` / `-a`, `--detected` / `-d` | Lists registered and/or auto-detected applications. | `cheapwine list --all` |
-| **`cheapwine export`**| `<name>`, `--uri-scheme` | Generates a desktop launcher in the host Linux applications menu and registers URI protocols. | `cheapwine export "RetroGame" --uri-scheme myapp` |
+| **`cheapwine export`**| `<name>`, `--uri-scheme`, `--icon`/`-i` | Generates a desktop launcher in the host Linux applications menu, setting a custom icon and URI protocols. | `cheapwine export "RetroGame" --icon logo.png --uri-scheme myapp` |
 | **`cheapwine unexport`**| `<name>` | Removes an exported desktop launcher and associated URI handlers from the host. | `cheapwine unexport "RetroGame"` |
 | **`cheapwine wine`** | `[wine_args...]` | Runs a Wine utility in the prefix context. Defaults to `winecfg`. | `cheapwine wine regedit` |
 | **`cheapwine winetricks`**| `[tricks_args...]` | Runs `winetricks` inside the local prefix context. | `cheapwine winetricks corefonts` |

@@ -253,6 +253,46 @@ class TestCheapwine(unittest.TestCase):
         self.assertIn("Unexported", result_unexport.output)
         self.assertFalse(desktop_file_path.exists())
 
+    def test_export_custom_icon(self):
+        """Test exporting an application with a custom icon image, SVG, and theme name."""
+        from PIL import Image
+        self.runner.invoke(cli, ["init"])
+        self.runner.invoke(cli, ["add", "iconapp", "C:\\Program Files\\iconapp.exe"])
+
+        # 1. Custom PNG image (non-square to test padding and resizing)
+        icon_path = self.test_dir / "my_icon.png"
+        img = Image.new("RGB", (128, 64), color="blue")
+        img.save(icon_path)
+
+        result_export = self.runner.invoke(cli, ["export", "iconapp", "--icon", str(icon_path)])
+        self.assertEqual(result_export.exit_code, 0)
+        self.assertIn("Exported", result_export.output)
+
+        desktop_file = Path("~/.local/share/applications/iconapp.desktop").expanduser()
+        self.assertTrue(desktop_file.exists())
+        content = desktop_file.read_text(encoding="utf-8")
+        self.assertIn("Icon=cheapwine-iconapp", content)
+
+        # Check installed icon file exists in hicolor theme
+        hicolor_icon = Path("~/.local/share/icons/hicolor/128x128/apps/cheapwine-iconapp.png").expanduser()
+        self.assertTrue(hicolor_icon.exists())
+
+        # 2. Custom SVG file
+        svg_path = self.test_dir / "vector_icon.svg"
+        svg_path.write_text("<svg><rect width='10' height='10'/></svg>", encoding="utf-8")
+
+        result_svg = self.runner.invoke(cli, ["export", "iconapp", "-i", str(svg_path)])
+        self.assertEqual(result_svg.exit_code, 0)
+
+        svg_hicolor = Path("~/.local/share/icons/hicolor/scalable/apps/cheapwine-iconapp.svg").expanduser()
+        self.assertTrue(svg_hicolor.exists())
+
+        # 3. Icon theme name
+        result_theme = self.runner.invoke(cli, ["export", "iconapp", "--icon", "firefox"])
+        self.assertEqual(result_theme.exit_code, 0)
+        content_theme = desktop_file.read_text(encoding="utf-8")
+        self.assertIn("Icon=firefox", content_theme)
+
     def test_unexport_coexistence(self):
         """Test that unexporting a registered app also unexports its auto-detected counterpart and vice-versa."""
         from unittest.mock import patch
