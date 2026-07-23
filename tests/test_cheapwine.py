@@ -882,5 +882,42 @@ class TestCheapwine(unittest.TestCase):
             self.assertEqual(url, "http://dummy/wine-d2d1-11.0-x86_64.tar.zst")
             self.assertEqual(asset_name, "wine-d2d1-11.0-x86_64.tar.zst")
 
+    def test_extract_icon_cli_nonexistent(self):
+        """Test extract_icon with non-existent executable file."""
+        result = self.runner.invoke(cli, ["extract_icon", "nonexistent.exe", "output.png"])
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("not found", result.output.lower())
+
+    def test_extract_icon_cli_success(self):
+        """Test extract_icon with mocked extract_icon_to_file success."""
+        dummy_exe = self.test_dir / "app.exe"
+        dummy_exe.touch()
+        target_img = self.test_dir / "out.png"
+
+        with patch("cheapwine.cli.extract_icon_to_file", return_value=True) as mock_extract:
+            result = self.runner.invoke(cli, ["extract_icon", str(dummy_exe), str(target_img)])
+            self.assertEqual(result.exit_code, 0)
+            mock_extract.assert_called_once()
+            self.assertIn("Extracted", result.output)
+
+    def test_extract_icon_hyphen_alias(self):
+        """Test extract-icon hyphenated alias."""
+        dummy_exe = self.test_dir / "app.exe"
+        dummy_exe.touch()
+        target_img = self.test_dir / "out.png"
+
+        with patch("cheapwine.cli.extract_icon_to_file", return_value=True) as mock_extract:
+            result = self.runner.invoke(cli, ["extract-icon", str(dummy_exe), str(target_img)])
+            self.assertEqual(result.exit_code, 0)
+            mock_extract.assert_called_once()
+
+    def test_extract_icon_to_file_nonexistent_exe(self):
+        """Test extract_icon_to_file returns False when exe does not exist."""
+        from cheapwine.cli import extract_icon_to_file
+        res = extract_icon_to_file("nonexistent_file.exe", "out.png")
+        self.assertFalse(res)
+
 if __name__ == "__main__":
     unittest.main()
+
+

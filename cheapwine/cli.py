@@ -2,7 +2,7 @@ import click
 import os
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 
 from cheapwine import __version__
 from cheapwine.project import Project
@@ -568,6 +568,155 @@ def extract_exe_icon(exe_path: Path, icon_name: str) -> bool:
             pass
 
 
+def extract_icon_to_file(exe_path: Union[str, Path], target_path: Union[str, Path]) -> bool:
+    """Extract application icon from a Windows executable or DLL and save it to target_path."""
+    try:
+        import pefile
+        from PIL import Image
+        import io
+    except ImportError as e:
+        print_warning(f"Icon extraction requires pefile and Pillow: {e}")
+        return False
+
+    exe_path = Path(exe_path).expanduser().resolve()
+    target_path = Path(target_path).expanduser()
+
+    if not exe_path.exists():
+        print_error(f"Executable file not found: {exe_path}")
+        return False
+
+    try:
+        pe = pefile.PE(str(exe_path))
+    except Exception as e:
+        print_error(f"Could not parse PE file {exe_path}: {e}")
+        return False
+
+    try:
+        if not hasattr(pe, "DIRECTORY_ENTRY_RESOURCE") or not pe.DIRECTORY_ENTRY_RESOURCE.entries:
+            print_error(f"No resource entries found in {exe_path}")
+            return False
+
+        rt_group_icon = [e for e in pe.DIRECTORY_ENTRY_RESOURCE.entries if e.id == pefile.RESOURCE_TYPE["RT_GROUP_ICON"]]
+        if not rt_group_icon:
+            print_error(f"No RT_GROUP_ICON resources found in {exe_path}")
+            return False
+        rt_icon = [e for e in pe.DIRECTORY_ENTRY_RESOURCE.entries if e.id == pefile.RESOURCE_TYPE["RT_ICON"]]
+        if not rt_icon:
+            print_error(f"No RT_ICON resources found in {exe_path}")
+            return False
+
+        best_ico_buf = None
+        best_frames = []
+
+        for group_type_entry in rt_group_icon:
+            try:
+                group_id_entry = list(group_type_entry.directory.entries)[0]
+                group_lang_entry = list(group_id_entry.directory.entries)[0]
+                data_rva = group_lang_entry.data.struct.OffsetToData
+                data_size = group_lang_entry.data.struct.Size
+                group_data = pe.get_memory_mapped_image()[data_rva:data_rva + data_size]
+            except Exception:
+                continue
+
+            count = int.from_bytes(group_data[4:6], "little")
+            icon_data_chunks = []
+            icon_sizes = []
+
+            for i in range(count):
+                entry_offset = 6 + i * 14
+                entry = group_data[entry_offset:entry_offset + 14]
+                w = entry[0] or 256
+                h = entry[1] or 256
+                nid = int.from_bytes(entry[12:14], "little")
+
+                for icon_type_entry in rt_icon:
+                    try:
+                        for icon_id_entry in list(icon_type_entry.directory.entries):
+                            if icon_id_entry.id == nid:
+                                icon_lang_entry = list(icon_id_entry.directory.entries)[0]
+                                rva = icon_lang_entry.data.struct.OffsetToData
+                                size = icon_lang_entry.data.struct.Size
+                                icon_raw = pe.get_memory_mapped_image()[rva:rva + size]
+                                icon_data_chunks.append(icon_raw)
+                                icon_sizes.append((w, h))
+                                break
+                    except Exception:
+                        continue
+
+            if not icon_data_chunks:
+                continue
+
+            ico_buf = io.BytesIO()
+            ico_buf.write(b"\x00\x00\x01\x00")
+            ico_buf.write(count.to_bytes(2, "little"))
+            offset = 6 + count * 16
+            for i, raw in enumerate(icon_data_chunks):
+                w = min(icon_sizes[i][0], 255)
+                h = min(icon_sizes[i][1], 255)
+                ico_buf.write(bytes([w, h, 0, 0]))
+                ico_buf.write(b"\x01\x00")
+                ico_buf.write(b"\x20\x00")
+                ico_buf.write(len(raw).to_bytes(4, "little"))
+                ico_buf.write(offset.to_bytes(4, "little"))
+                offset += len(raw)
+            for raw in icon_data_chunks:
+                ico_buf.write(raw)
+            ico_buf.seek(0)
+
+            try:
+                img = Image.open(ico_buf)
+                n_frames = getattr(img, "n_frames", 1)
+                frames = []
+                for i in range(n_frames):
+                    img.seek(i)
+                    frames.append(img.copy())
+                if frames:
+                    best_ico_buf = ico_buf
+                    best_frames = frames
+                    break
+            except Exception:
+                continue
+
+        if not best_frames and not best_ico_buf:
+            print_error(f"Could not decode icon image from {exe_path}")
+            return False
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if target_path.suffix.lower() == ".ico":
+            with open(target_path, "wb") as f:
+                f.write(best_ico_buf.getvalue())
+            return True
+
+        best_frame = max(best_frames, key=lambda f: f.size[0] * f.size[1])
+
+        fmt = target_path.suffix.lstrip(".").upper()
+        if not fmt:
+            fmt = "PNG"
+        elif fmt in ("JPG", "JPEG"):
+            fmt = "JPEG"
+
+        if fmt == "JPEG" and best_frame.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", best_frame.size, (255, 255, 255))
+            if best_frame.mode == "RGBA":
+                bg.paste(best_frame, mask=best_frame.split()[3])
+            else:
+                bg.paste(best_frame.convert("RGBA"))
+            bg.save(target_path, format=fmt)
+        else:
+            if best_frame.mode != "RGBA" and fmt in ("PNG", "WEBP"):
+                best_frame = best_frame.convert("RGBA")
+            best_frame.save(target_path, format=fmt)
+
+        return True
+
+    finally:
+        try:
+            pe.close()
+        except Exception:
+            pass
+
+
 def process_custom_icon(icon_input: Union[str, Path], icon_name: str, project_root: Optional[Path] = None) -> Tuple[bool, str]:
     """Process a custom icon (image file, ICO, SVG, EXE, or icon theme name) and install it for host desktop."""
     if not icon_input:
@@ -1115,5 +1264,18 @@ def easydistill():
     from cheapwine.tui import run_easydistill
     run_easydistill(project)
 
+@cli.command(name="extract_icon")
+@click.argument("exe_path", type=click.Path(path_type=Path))
+@click.argument("target_path", type=click.Path(path_type=Path))
+def extract_icon(exe_path: Path, target_path: Path):
+    """Extract an icon from a Windows executable or DLL into an image file."""
+    if extract_icon_to_file(exe_path, target_path):
+        print_step("Extracted", f"Icon extracted from [accent]{exe_path}[/accent] to [bold]{target_path}[/bold]")
+    else:
+        sys.exit(1)
+
+cli.add_command(extract_icon, name="extract-icon")
+
 if __name__ == "__main__":
     cli()
+
