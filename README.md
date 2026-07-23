@@ -268,7 +268,7 @@ cheapwine unexport "SteamApp"
 | **`cheapwine chocolatey`**| `[choco_args...]` | Runs Chocolatey commands inside the local prefix context (auto-installs if missing). | `cheapwine chocolatey install firefox` |
 | **`cheapwine env`** | *None* | Prints shell environment exports to manually hook your terminal into the prefix. | `cheapwine env` |
 | **`cheapwine uri`** | `<URL>` | Handles a URI from the host system via the exported application's protocol. | `cheapwine uri myapp://args` |
-| **`cheapwine extract_icon`** | `<exe_path>`, `<target_path>` | Extracts application icon from a Windows executable or DLL into an image file (`.png`, `.ico`, `.jpg`, etc.). | `cheapwine extract_icon game.exe icon.png` |
+| **`cheapwine extract_icon`** | `<exe_or_app>`, `<target_path>` | Extracts application icon from an executable path, registered app, or auto-detected app into an image file (`.png`, `.ico`, `.jpg`, etc.). | `cheapwine extract_icon "SteamApp" icon.png` |
 | **`cheapwine easydistill`**| *None* | Launches the interactive TUI configuration editor for `distillery.json`. | `cheapwine easydistill` |
 
 ---

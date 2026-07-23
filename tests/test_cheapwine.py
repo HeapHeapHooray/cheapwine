@@ -917,7 +917,37 @@ class TestCheapwine(unittest.TestCase):
         res = extract_icon_to_file("nonexistent_file.exe", "out.png")
         self.assertFalse(res)
 
+    def test_extract_icon_registered_app(self):
+        """Test resolving registered app name for extract_icon."""
+        self.runner.invoke(cli, ["init"])
+        exe_file = self.test_dir / "bin" / "game.exe"
+        exe_file.parent.mkdir(parents=True, exist_ok=True)
+        exe_file.touch()
+
+        self.runner.invoke(cli, ["add", "mygame", str(exe_file)])
+
+        from cheapwine.cli import resolve_target_exe
+        resolved = resolve_target_exe("mygame")
+        self.assertIsNotNone(resolved)
+        self.assertEqual(resolved, exe_file.resolve())
+
+    def test_extract_icon_autodetected_app(self):
+        """Test resolving auto-detected app name for extract_icon."""
+        self.runner.invoke(cli, ["init"])
+        dummy_exe = self.test_dir / ".cheapwine" / "drive_c" / "Program Files" / "7-Zip" / "7zFM.exe"
+        dummy_exe.parent.mkdir(parents=True, exist_ok=True)
+        dummy_exe.touch()
+
+        detected_app = [{"name": "7-Zip", "exe": "C:\\Program Files\\7-Zip\\7zFM.exe", "wine_arch": "win64"}]
+        with patch("cheapwine.tui.scan_installed_apps", return_value=detected_app):
+            from cheapwine.cli import resolve_target_exe
+            resolved = resolve_target_exe("7-Zip")
+            self.assertIsNotNone(resolved)
+            self.assertEqual(resolved, dummy_exe.resolve())
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

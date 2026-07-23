@@ -568,8 +568,97 @@ def extract_exe_icon(exe_path: Path, icon_name: str) -> bool:
             pass
 
 
+def _resolve_wine_exe_path(prefix: Path, exe_path: str) -> Optional[Path]:
+    """Helper to turn a Wine exe path specification into a Path object."""
+    if not exe_path:
+        return None
+    if "C:\\" in exe_path or "c:\\" in exe_path:
+        relative = exe_path.replace("C:\\", "").replace("c:\\", "").replace("\\", "/")
+        return prefix / "drive_c" / relative
+    elif "\\" in exe_path:
+        relative = exe_path.replace("\\", "/")
+        return prefix / "drive_c" / relative
+    elif "/" in exe_path:
+        p = Path(exe_path)
+        if p.is_absolute() and p.exists():
+            return p
+        return prefix / "drive_c" / exe_path.lstrip("/")
+    else:
+        candidate = prefix / "drive_c" / "windows" / exe_path
+        if candidate.exists():
+            return candidate
+        for d in [prefix / "drive_c" / "windows" / "system32", prefix / "drive_c" / "Program Files", prefix / "drive_c" / "Program Files (x86)"]:
+            if (d / exe_path).exists():
+                return d / exe_path
+        return candidate
+
+
+def resolve_target_exe(target: Union[str, Path], project: Optional[Project] = None) -> Optional[Path]:
+    """Resolve an executable file path from a direct file path, registered app name, or auto-detected app name."""
+    if not target:
+        return None
+
+    target_str = str(target).strip()
+    p = Path(target_str).expanduser()
+
+    # 1. Direct file path on host filesystem
+    if p.exists() and p.is_file():
+        return p.resolve()
+
+    # 2. Check within project if available or discoverable
+    if project is None:
+        try:
+            project = Project.find_project()
+        except Exception:
+            project = None
+
+    if project:
+        # Check registered apps in distillery.json
+        config = project.load_config()
+        registered_apps = config.get("apps", {})
+        for app_name, app_data in registered_apps.items():
+            if app_name.lower() == target_str.lower():
+                exe_path_str = app_data.get("exe")
+                if exe_path_str:
+                    wine_arch = app_data.get("wine_arch")
+                    prefix = get_wine_prefix_path(project, wine_arch)
+                    full_path = _resolve_wine_exe_path(prefix, exe_path_str)
+                    if full_path and full_path.exists() and full_path.is_file():
+                        return full_path
+
+        # Check auto-detected apps
+        try:
+            from cheapwine.tui import scan_installed_apps
+            detected = scan_installed_apps(project)
+            for app in detected:
+                if app.get("name", "").lower() == target_str.lower():
+                    exe_path_str = app.get("exe")
+                    if exe_path_str:
+                        wine_arch = app.get("wine_arch")
+                        prefix = get_wine_prefix_path(project, wine_arch)
+                        full_path = _resolve_wine_exe_path(prefix, exe_path_str)
+                        if full_path and full_path.exists() and full_path.is_file():
+                            return full_path
+        except Exception:
+            pass
+
+        # Check relative to project root
+        alt_root = (project.root_dir / p).resolve()
+        if alt_root.exists() and alt_root.is_file():
+            return alt_root
+
+        # Check relative to Wine drive_c
+        prefix = get_wine_prefix_path(project)
+        rel_str = target_str.replace("C:\\", "").replace("c:\\", "").replace("\\", "/")
+        alt_prefix = (prefix / "drive_c" / rel_str.lstrip("/")).resolve()
+        if alt_prefix.exists() and alt_prefix.is_file():
+            return alt_prefix
+
+    return None
+
+
 def extract_icon_to_file(exe_path: Union[str, Path], target_path: Union[str, Path]) -> bool:
-    """Extract application icon from a Windows executable or DLL and save it to target_path."""
+    """Extract application icon from a Windows executable, DLL, registered app, or auto-detected app and save it to target_path."""
     try:
         import pefile
         from PIL import Image
@@ -578,12 +667,14 @@ def extract_icon_to_file(exe_path: Union[str, Path], target_path: Union[str, Pat
         print_warning(f"Icon extraction requires pefile and Pillow: {e}")
         return False
 
-    exe_path = Path(exe_path).expanduser().resolve()
+    resolved_exe = resolve_target_exe(exe_path)
     target_path = Path(target_path).expanduser()
 
-    if not exe_path.exists():
-        print_error(f"Executable file not found: {exe_path}")
+    if not resolved_exe or not resolved_exe.exists():
+        print_error(f"Executable file or application not found: {exe_path}")
         return False
+
+    exe_path = resolved_exe
 
     try:
         pe = pefile.PE(str(exe_path))
@@ -1265,12 +1356,12 @@ def easydistill():
     run_easydistill(project)
 
 @cli.command(name="extract_icon")
-@click.argument("exe_path", type=click.Path(path_type=Path))
+@click.argument("target", metavar="<EXE_OR_APP>")
 @click.argument("target_path", type=click.Path(path_type=Path))
-def extract_icon(exe_path: Path, target_path: Path):
-    """Extract an icon from a Windows executable or DLL into an image file."""
-    if extract_icon_to_file(exe_path, target_path):
-        print_step("Extracted", f"Icon extracted from [accent]{exe_path}[/accent] to [bold]{target_path}[/bold]")
+def extract_icon(target: str, target_path: Path):
+    """Extract an icon from a Windows executable, registered app, or auto-detected app into an image file."""
+    if extract_icon_to_file(target, target_path):
+        print_step("Extracted", f"Icon extracted to [bold]{target_path}[/bold]")
     else:
         sys.exit(1)
 
@@ -1278,4 +1369,5 @@ cli.add_command(extract_icon, name="extract-icon")
 
 if __name__ == "__main__":
     cli()
+
 
